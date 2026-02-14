@@ -15,7 +15,8 @@ builds:
       - -X github.com/lu-zhengda/macbroom/internal/cli.date={{.Date}}
 
 archives:
-  - format: tar.gz
+  - formats:
+      - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
