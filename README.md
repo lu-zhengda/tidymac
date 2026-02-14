@@ -1,6 +1,6 @@
 # tidymac
 
-A lightweight macOS cleanup tool. Like ***REMOVED***, but for the terminal.
+A lightweight macOS cleanup tool for the terminal.
 
 Scan and remove system junk, browser caches, Xcode artifacts, and more — from the command line or an interactive TUI.
 
