@@ -1,0 +1,43 @@
+version: 2
+
+builds:
+  - main: ./cmd/macbroom
+    binary: macbroom
+    goos:
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/zhengda-lu/macbroom/internal/cli.version={{.Version}}
+      - -X github.com/zhengda-lu/macbroom/internal/cli.commit={{.ShortCommit}}
+      - -X github.com/zhengda-lu/macbroom/internal/cli.date={{.Date}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+brews:
+  - repository:
+      owner: zhengda-lu
+      name: homebrew-tap
+    directory: Formula
+    homepage: "https://github.com/zhengda-lu/macbroom"
+    description: "A lightweight macOS cleanup tool"
+    license: "MIT"
+    install: |
+      bin.install "macbroom"
+    test: |
+      system "#{bin}/macbroom", "--version"

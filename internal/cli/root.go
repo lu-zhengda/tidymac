@@ -15,12 +15,20 @@ import (
 	"github.com/zhengda-lu/macbroom/internal/utils"
 )
 
-var yoloMode bool
+var (
+	yoloMode bool
+
+	// Set via ldflags at build time.
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
 
 var rootCmd = &cobra.Command{
-	Use:   "macbroom",
-	Short: "A lightweight macOS cleanup tool",
-	Long:  "macbroom scans and cleans system junk, browser caches, Xcode artifacts, and more.\nLaunch without subcommands for interactive TUI mode.",
+	Use:     "macbroom",
+	Short:   "A lightweight macOS cleanup tool",
+	Long:    "macbroom scans and cleans system junk, browser caches, Xcode artifacts, and more.\nLaunch without subcommands for interactive TUI mode.",
+	Version: version,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e := buildEngine()
 		p := tea.NewProgram(tui.New(e), tea.WithAltScreen())
@@ -34,6 +42,7 @@ func Execute() error {
 }
 
 func init() {
+	rootCmd.SetVersionTemplate(fmt.Sprintf("macbroom %s (commit: %s, built: %s)\n", version, commit, date))
 	rootCmd.PersistentFlags().BoolVar(&yoloMode, "yolo", false, "Skip ALL confirmation prompts (dangerous!)")
 	rootCmd.AddCommand(scanCmd)
 	rootCmd.AddCommand(cleanCmd)
