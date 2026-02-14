@@ -16,6 +16,8 @@ archives:
   - formats:
       - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - docs/man/*.1
 
 checksum:
   name_template: "checksums.txt"

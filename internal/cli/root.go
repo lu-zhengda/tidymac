@@ -190,6 +190,11 @@ func scanWithCategories(e *engine.Engine, cats []string) ([]scanner.Target, erro
 	return all, nil
 }
 
+// RootCmd returns the root cobra command for documentation generation.
+func RootCmd() *cobra.Command {
+	return rootCmd
+}
+
 // expandPaths expands ~ to the user's home directory in each path.
 func expandPaths(paths []string) []string {
 	home := utils.HomeDir()

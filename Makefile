@@ -1,4 +1,4 @@
-.PHONY: build run test lint clean install uninstall
+.PHONY: build run test lint clean install uninstall man
 
 BINARY     := macbroom
 BUILD_DIR  := ./bin
@@ -28,3 +28,6 @@ uninstall:
 
 clean:
 	rm -rf $(BUILD_DIR)
+
+man:
+	go run ./cmd/gendocs
