@@ -11,8 +11,6 @@ builds:
     ldflags:
       - -s -w
       - -X github.com/lu-zhengda/tidymac/internal/cli.version={{.Version}}
-      - -X github.com/lu-zhengda/tidymac/internal/cli.commit={{.ShortCommit}}
-      - -X github.com/lu-zhengda/tidymac/internal/cli.date={{.Date}}
 
 archives:
   - formats:

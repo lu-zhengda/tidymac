@@ -4,12 +4,8 @@ BINARY     := tidymac
 BUILD_DIR  := ./bin
 PREFIX     ?= /usr/local
 VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-COMMIT     := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
-DATE       := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS    := -s -w \
-	-X github.com/lu-zhengda/tidymac/internal/cli.version=$(VERSION) \
-	-X github.com/lu-zhengda/tidymac/internal/cli.commit=$(COMMIT) \
-	-X github.com/lu-zhengda/tidymac/internal/cli.date=$(DATE)
+	-X github.com/lu-zhengda/tidymac/internal/cli.version=$(VERSION)
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) ./cmd/tidymac

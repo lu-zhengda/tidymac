@@ -20,8 +20,6 @@ var (
 
 	// Set via ldflags at build time.
 	version = "dev"
-	commit  = "none"
-	date    = "unknown"
 )
 
 var rootCmd = &cobra.Command{
@@ -42,7 +40,7 @@ func Execute() error {
 }
 
 func init() {
-	rootCmd.SetVersionTemplate(fmt.Sprintf("tidymac %s (commit: %s, built: %s)\n", version, commit, date))
+	rootCmd.SetVersionTemplate(fmt.Sprintf("tidymac %s\n", version))
 	rootCmd.PersistentFlags().BoolVar(&yoloMode, "yolo", false, "Skip ALL confirmation prompts (dangerous!)")
 	rootCmd.AddCommand(scanCmd)
 	rootCmd.AddCommand(cleanCmd)
