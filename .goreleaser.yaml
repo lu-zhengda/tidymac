@@ -34,6 +34,7 @@ brews:
   - repository:
       owner: lu-zhengda
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
     homepage: "https://github.com/lu-zhengda/macbroom"
     description: "A lightweight macOS cleanup tool"
