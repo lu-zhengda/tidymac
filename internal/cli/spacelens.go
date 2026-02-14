@@ -5,12 +5,17 @@ import (
 	"fmt"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"github.com/zhengda-lu/macbroom/internal/scanner"
+	"github.com/zhengda-lu/macbroom/internal/tui"
 	"github.com/zhengda-lu/macbroom/internal/utils"
 )
 
-var spacelensDepth int
+var (
+	spacelensDepth       int
+	spacelensInteractive bool
+)
 
 var spacelensCmd = &cobra.Command{
 	Use:   "spacelens [path]",
@@ -20,6 +25,12 @@ var spacelensCmd = &cobra.Command{
 		path := utils.HomeDir()
 		if len(args) > 0 {
 			path = args[0]
+		}
+
+		if spacelensInteractive {
+			p := tea.NewProgram(tui.NewSpaceLensModel(path), tea.WithAltScreen())
+			_, err := p.Run()
+			return err
 		}
 
 		fmt.Printf("Analyzing %s...\n\n", path)
@@ -36,6 +47,7 @@ var spacelensCmd = &cobra.Command{
 
 func init() {
 	spacelensCmd.Flags().IntVar(&spacelensDepth, "depth", 2, "Maximum directory depth to analyze")
+	spacelensCmd.Flags().BoolVarP(&spacelensInteractive, "interactive", "i", false, "Launch interactive TUI mode")
 }
 
 func printSpaceLensNodes(nodes []scanner.SpaceLensNode, indent int) {
