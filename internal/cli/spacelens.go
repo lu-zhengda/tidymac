@@ -22,7 +22,7 @@ var spacelensCmd = &cobra.Command{
 	Short: "Visualize disk space usage",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path := utils.HomeDir()
+		path := "/"
 		if len(args) > 0 {
 			path = args[0]
 		}

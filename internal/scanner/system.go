@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/zhengda-lu/macbroom/internal/utils"
 )
@@ -28,8 +29,6 @@ func (s *SystemScanner) base() string {
 }
 
 func (s *SystemScanner) Scan(ctx context.Context) ([]Target, error) {
-	var targets []Target
-
 	dirs := []struct {
 		subpath     string
 		description string
@@ -38,10 +37,19 @@ func (s *SystemScanner) Scan(ctx context.Context) ([]Target, error) {
 		{"Logs", "System and application logs"},
 	}
 
+	// First pass: collect all entries and paths that need sizing
+	type entryInfo struct {
+		path        string
+		description string
+		info        os.FileInfo
+	}
+	var allEntries []entryInfo
+	var dirPaths []string
+
 	for _, d := range dirs {
 		select {
 		case <-ctx.Done():
-			return targets, ctx.Err()
+			return nil, ctx.Err()
 		default:
 		}
 
@@ -62,28 +70,56 @@ func (s *SystemScanner) Scan(ctx context.Context) ([]Target, error) {
 				continue
 			}
 
-			var size int64
-			if info.IsDir() {
-				size, _ = utils.DirSize(entryPath)
-			} else {
-				size = info.Size()
-			}
-
-			if size == 0 {
-				continue
-			}
-
-			targets = append(targets, Target{
-				Path:        entryPath,
-				Size:        size,
-				Category:    "System Junk",
-				Description: d.description,
-				Risk:        Safe,
-				ModTime:     info.ModTime(),
-				IsDir:       info.IsDir(),
+			allEntries = append(allEntries, entryInfo{
+				path:        entryPath,
+				description: d.description,
+				info:        info,
 			})
+			if info.IsDir() {
+				dirPaths = append(dirPaths, entryPath)
+			}
 		}
 	}
 
+	// Compute all directory sizes in parallel
+	sizes := utils.DirSizesParallel(dirPaths)
+
+	// Build targets using precomputed sizes
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	targets := make([]Target, 0, len(allEntries))
+
+	for _, e := range allEntries {
+		wg.Add(1)
+		go func(e entryInfo) {
+			defer wg.Done()
+			var size int64
+			if e.info.IsDir() {
+				size = sizes[e.path]
+			} else {
+				size = e.info.Size()
+			}
+
+			if size == 0 {
+				return
+			}
+
+			t := Target{
+				Path:        e.path,
+				Size:        size,
+				Category:    "System Junk",
+				Description: e.description,
+				Risk:        Safe,
+				ModTime:     e.info.ModTime(),
+				IsDir:       e.info.IsDir(),
+			}
+
+			mu.Lock()
+			targets = append(targets, t)
+			mu.Unlock()
+		}(e)
+	}
+
+	wg.Wait()
 	return targets, nil
 }
