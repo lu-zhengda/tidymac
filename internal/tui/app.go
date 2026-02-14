@@ -25,6 +25,7 @@ const (
 	viewConfirm
 	viewResult
 	viewSpaceLens
+	viewSpaceLensConfirm
 	viewMaintain
 	viewMaintainResult
 )
@@ -82,13 +83,15 @@ type Model struct {
 	lastSize    int64
 
 	// Space Lens state
-	slPath       string
-	slNodes      []scanner.SpaceLensNode
-	slCursor     int
-	slLoading    bool
-	slScanning   string // current item being scanned
-	slCancel     context.CancelFunc
-	slProgressCh chan string
+	slPath         string
+	slNodes        []scanner.SpaceLensNode
+	slCursor       int
+	slScrollOffset int
+	slLoading      bool
+	slScanning     string // current item being scanned
+	slCancel       context.CancelFunc
+	slProgressCh   chan string
+	slDeleteTarget *scanner.SpaceLensNode
 
 	// Maintenance state
 	maintainResults []maintain.Result
@@ -215,6 +218,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.slScanning = ""
 		m.slCancel = nil
 		m.slProgressCh = nil
+		m.slScrollOffset = 0
 		return m, nil
 
 	case maintainDoneMsg:
@@ -241,6 +245,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateResult(msg)
 		case viewSpaceLens:
 			return m.updateSpaceLens(msg)
+		case viewSpaceLensConfirm:
+			return m.updateSpaceLensConfirm(msg)
 		case viewMaintain:
 			// waiting for results, no input
 		case viewMaintainResult:
@@ -270,6 +276,7 @@ func (m Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case 1: // Space Lens
 			m.slLoading = true
 			m.slCursor = 0
+			m.slScrollOffset = 0
 			m.slPath = "/"
 			m.currentView = viewSpaceLens
 			cancel, ch, cmd := startSpaceLens(m.slPath)
@@ -417,24 +424,30 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if m.slCursor > 0 {
 			m.slCursor--
+			m.slEnsureCursorVisible()
 		}
 	case "down", "j":
 		max := len(m.slNodes) - 1
-		if max > 29 {
-			max = 29
-		}
 		if m.slCursor < max {
 			m.slCursor++
+			m.slEnsureCursorVisible()
 		}
 	case "enter":
 		if m.slCursor < len(m.slNodes) && m.slNodes[m.slCursor].IsDir {
 			m.slPath = m.slNodes[m.slCursor].Path
 			m.slLoading = true
 			m.slCursor = 0
+			m.slScrollOffset = 0
 			cancel, ch, cmd := startSpaceLens(m.slPath)
 			m.slCancel = cancel
 			m.slProgressCh = ch
 			return m, tea.Batch(cmd, m.spinner.Tick)
+		}
+	case "d":
+		if m.slCursor < len(m.slNodes) {
+			node := m.slNodes[m.slCursor]
+			m.slDeleteTarget = &node
+			m.currentView = viewSpaceLensConfirm
 		}
 	case "h":
 		// Go up one directory
@@ -442,6 +455,7 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.slPath = m.slPath[:idx]
 			m.slLoading = true
 			m.slCursor = 0
+			m.slScrollOffset = 0
 			cancel, ch, cmd := startSpaceLens(m.slPath)
 			m.slCancel = cancel
 			m.slProgressCh = ch
@@ -450,6 +464,39 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "backspace":
 		m.currentView = viewMenu
 		m.cursor = 1
+	}
+	return m, nil
+}
+
+func (m *Model) slEnsureCursorVisible() {
+	visible := m.visibleItemCount()
+	if m.slCursor < m.slScrollOffset {
+		m.slScrollOffset = m.slCursor
+	}
+	if m.slCursor >= m.slScrollOffset+visible {
+		m.slScrollOffset = m.slCursor - visible + 1
+	}
+}
+
+func (m Model) updateSpaceLensConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y":
+		if m.slDeleteTarget != nil {
+			_ = trash.MoveToTrash(m.slDeleteTarget.Path)
+			m.slDeleteTarget = nil
+			m.slLoading = true
+			m.slCursor = 0
+			m.slScrollOffset = 0
+			m.currentView = viewSpaceLens
+			cancel, ch, cmd := startSpaceLens(m.slPath)
+			m.slCancel = cancel
+			m.slProgressCh = ch
+			return m, tea.Batch(cmd, m.spinner.Tick)
+		}
+		m.currentView = viewSpaceLens
+	case "n", "esc":
+		m.slDeleteTarget = nil
+		m.currentView = viewSpaceLens
 	}
 	return m, nil
 }
@@ -506,6 +553,8 @@ func (m Model) View() string {
 		return m.viewResult()
 	case viewSpaceLens:
 		return m.viewSpaceLens()
+	case viewSpaceLensConfirm:
+		return m.viewSpaceLensConfirm()
 	case viewMaintain:
 		return m.viewMaintain()
 	case viewMaintainResult:
@@ -686,9 +735,9 @@ func (m Model) viewResult() string {
 
 func (m Model) viewSpaceLens() string {
 	s := titleStyle.Render("macbroom -- Space Lens") + "\n"
-	s += dimStyle.Render(m.slPath) + "\n\n"
 
 	if m.slLoading {
+		s += dimStyle.Render(m.slPath) + "\n\n"
 		s += m.spinner.View() + " Analyzing...\n"
 		if m.slScanning != "" {
 			name := m.slScanning
@@ -701,18 +750,29 @@ func (m Model) viewSpaceLens() string {
 		return s
 	}
 
+	// Calculate total size for header and percentages.
+	var totalSize int64
+	for _, node := range m.slNodes {
+		totalSize += node.Size
+	}
+
+	s += dimStyle.Render(fmt.Sprintf("%s (%s)", m.slPath, utils.FormatSize(totalSize))) + "\n\n"
+
 	if len(m.slNodes) == 0 {
 		s += "Empty directory.\n"
 		return s + helpStyle.Render("\nesc back | q quit")
 	}
 
 	maxSize := m.slNodes[0].Size
-	visible := m.slNodes
-	if len(visible) > 30 {
-		visible = visible[:30]
+	visible := m.visibleItemCount()
+	total := len(m.slNodes)
+	end := m.slScrollOffset + visible
+	if end > total {
+		end = total
 	}
 
-	for i, node := range visible {
+	for i := m.slScrollOffset; i < end; i++ {
+		node := m.slNodes[i]
 		cursor := "  "
 		if i == m.slCursor {
 			cursor = "> "
@@ -728,9 +788,14 @@ func (m Model) viewSpaceLens() string {
 			name = name[:27] + "..."
 		}
 
+		pct := 0
+		if totalSize > 0 {
+			pct = int(float64(node.Size) / float64(totalSize) * 100)
+		}
+
 		bar := renderBar(node.Size, maxSize, 25)
-		line := fmt.Sprintf("%s%s %-30s %10s %s",
-			cursor, icon, name, utils.FormatSize(node.Size), bar)
+		line := fmt.Sprintf("%s%s %-30s %10s  %3d%%  %s",
+			cursor, icon, name, utils.FormatSize(node.Size), pct, bar)
 
 		if i == m.slCursor {
 			s += selectedStyle.Render(line) + "\n"
@@ -739,11 +804,30 @@ func (m Model) viewSpaceLens() string {
 		}
 	}
 
-	if len(m.slNodes) > 30 {
-		s += dimStyle.Render(fmt.Sprintf("\n  ... and %d more items", len(m.slNodes)-30)) + "\n"
+	// Scroll indicator
+	if total > visible {
+		s += dimStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.slScrollOffset+1, end, total)) + "\n"
 	}
 
-	s += helpStyle.Render("\nj/k navigate | enter drill in | h go up | esc back | q quit")
+	s += helpStyle.Render("\nj/k navigate | enter drill in | d delete | h go up | esc back | q quit")
+	return s
+}
+
+func (m Model) viewSpaceLensConfirm() string {
+	if m.slDeleteTarget == nil {
+		return "Nothing to confirm"
+	}
+
+	dangerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("196")).
+		Background(lipgloss.Color("52")).
+		Padding(0, 1)
+
+	s := dangerStyle.Render(" DELETE ITEM ") + "\n\n"
+	s += fmt.Sprintf("  Delete %s (%s)? (y/n)\n", m.slDeleteTarget.Name, utils.FormatSize(m.slDeleteTarget.Size))
+	s += dimStyle.Render(fmt.Sprintf("\n  Path: %s", m.slDeleteTarget.Path)) + "\n"
+	s += helpStyle.Render("\n  y confirm | n cancel | q quit")
 	return s
 }
 
