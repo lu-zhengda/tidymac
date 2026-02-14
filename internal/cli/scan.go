@@ -17,7 +17,16 @@ var scanCmd = &cobra.Command{
 	Use:   "scan",
 	Short: "Scan for junk files and reclaimable space",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("Scanning... (not yet implemented)")
+		e := buildEngine()
+		cats := selectedCategories(scanSystem, scanBrowser, scanXcode, scanLarge)
+
+		fmt.Println("Scanning...")
+		targets, err := scanWithCategories(e, cats)
+		if err != nil {
+			return fmt.Errorf("scan failed: %w", err)
+		}
+
+		printScanResults(targets)
 		return nil
 	},
 }

@@ -1,21 +1,71 @@
 package cli
 
 import (
+	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/zhengda-lu/macbroom/internal/scanner"
+	"github.com/zhengda-lu/macbroom/internal/utils"
 )
+
+var spacelensDepth int
 
 var spacelensCmd = &cobra.Command{
 	Use:   "spacelens [path]",
 	Short: "Visualize disk space usage",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		path := "/"
+		path := utils.HomeDir()
 		if len(args) > 0 {
 			path = args[0]
 		}
-		fmt.Printf("Analyzing %s... (not yet implemented)\n", path)
+
+		fmt.Printf("Analyzing %s...\n\n", path)
+		sl := scanner.NewSpaceLens(path, spacelensDepth)
+		nodes, err := sl.Analyze(context.Background())
+		if err != nil {
+			return fmt.Errorf("failed to analyze: %w", err)
+		}
+
+		printSpaceLensNodes(nodes, 0)
 		return nil
 	},
+}
+
+func init() {
+	spacelensCmd.Flags().IntVar(&spacelensDepth, "depth", 2, "Maximum directory depth to analyze")
+}
+
+func printSpaceLensNodes(nodes []scanner.SpaceLensNode, indent int) {
+	if len(nodes) == 0 {
+		return
+	}
+	for _, node := range nodes {
+		prefix := strings.Repeat("  ", indent)
+		icon := "  "
+		if node.IsDir {
+			icon = "D "
+		}
+		bar := sizeBar(node.Size, nodes[0].Size)
+		fmt.Printf("%s%s %-40s %10s %s\n", prefix, icon, node.Name, utils.FormatSize(node.Size), bar)
+
+		if len(node.Children) > 0 {
+			printSpaceLensNodes(node.Children, indent+1)
+		}
+	}
+}
+
+func sizeBar(size, maxSize int64) string {
+	if maxSize == 0 {
+		return ""
+	}
+	const maxBarLen = 30
+	ratio := float64(size) / float64(maxSize)
+	barLen := int(ratio * maxBarLen)
+	if barLen == 0 && size > 0 {
+		barLen = 1
+	}
+	return "[" + strings.Repeat("#", barLen) + strings.Repeat(".", maxBarLen-barLen) + "]"
 }
