@@ -2,6 +2,7 @@ package scanner
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,6 +70,10 @@ func (a *AppScanner) FindRelatedFiles(ctx context.Context, appName string) ([]Ta
 		"Containers",
 		"HTTPStorages",
 		"WebKit",
+		"LaunchAgents",
+		"Application Scripts",
+		"Group Containers",
+		"Cookies",
 	}
 
 	appNameLower := strings.ToLower(appName)
@@ -136,4 +141,129 @@ func (a *AppScanner) FindRelatedFiles(ctx context.Context, appName string) ([]Ta
 	}
 
 	return targets, nil
+}
+
+// FindOrphans scans the Preferences directory for .plist files whose
+// corresponding .app bundle no longer exists in the applications directory.
+// For each orphaned plist it also checks Caches and Application Support for
+// matching remnants and includes them in the results.
+func (a *AppScanner) FindOrphans(ctx context.Context) ([]Target, error) {
+	var targets []Target
+	lib := a.library()
+
+	prefsDir := filepath.Join(lib, "Preferences")
+	if !utils.DirExists(prefsDir) {
+		return targets, nil
+	}
+
+	entries, err := os.ReadDir(prefsDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read preferences directory: %w", err)
+	}
+
+	installedApps := make(map[string]bool)
+	for _, name := range a.ListApps() {
+		installedApps[strings.ToLower(name)] = true
+	}
+
+	for _, entry := range entries {
+		select {
+		case <-ctx.Done():
+			return targets, ctx.Err()
+		default:
+		}
+
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".plist") {
+			continue
+		}
+
+		appName := extractAppName(name)
+		if appName == "" {
+			continue
+		}
+
+		if installedApps[strings.ToLower(appName)] {
+			continue
+		}
+
+		// This plist has no matching installed app -- it is orphaned.
+		plistPath := filepath.Join(prefsDir, name)
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		targets = append(targets, Target{
+			Path:        plistPath,
+			Size:        info.Size(),
+			Category:    "Orphaned Preferences",
+			Description: fmt.Sprintf("Orphaned plist (%s)", appName),
+			Risk:        Safe,
+			ModTime:     info.ModTime(),
+			IsDir:       false,
+		})
+
+		// Also check Caches and Application Support for matching remnants.
+		bundleID := strings.TrimSuffix(name, ".plist")
+		relatedDirs := []string{"Caches", "Application Support"}
+		for _, dir := range relatedDirs {
+			dirPath := filepath.Join(lib, dir)
+			if !utils.DirExists(dirPath) {
+				continue
+			}
+
+			relEntries, err := os.ReadDir(dirPath)
+			if err != nil {
+				continue
+			}
+
+			bundleIDLower := strings.ToLower(bundleID)
+			appNameLower := strings.ToLower(appName)
+
+			for _, re := range relEntries {
+				reLower := strings.ToLower(re.Name())
+				if reLower != bundleIDLower && reLower != appNameLower {
+					continue
+				}
+
+				rePath := filepath.Join(dirPath, re.Name())
+				reInfo, err := re.Info()
+				if err != nil {
+					continue
+				}
+
+				var size int64
+				if reInfo.IsDir() {
+					size, _ = utils.DirSize(rePath)
+				} else {
+					size = reInfo.Size()
+				}
+
+				targets = append(targets, Target{
+					Path:        rePath,
+					Size:        size,
+					Category:    "Orphaned Preferences",
+					Description: fmt.Sprintf("Orphaned %s (%s)", dir, appName),
+					Risk:        Safe,
+					ModTime:     reInfo.ModTime(),
+					IsDir:       reInfo.IsDir(),
+				})
+			}
+		}
+	}
+
+	return targets, nil
+}
+
+// extractAppName attempts to derive an app name from a plist filename.
+// For example, "com.example.MyApp.plist" returns "MyApp".
+// It strips the ".plist" suffix and takes the last dot-separated component.
+func extractAppName(plistFilename string) string {
+	base := strings.TrimSuffix(plistFilename, ".plist")
+	parts := strings.Split(base, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[len(parts)-1]
 }

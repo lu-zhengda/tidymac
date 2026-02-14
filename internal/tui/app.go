@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/lu-zhengda/macbroom/internal/dupes"
@@ -33,6 +34,9 @@ const (
 	viewDupes
 	viewDupesResult
 	viewDupesConfirm
+	viewUninstallInput
+	viewUninstallResults
+	viewUninstallConfirm
 )
 
 type scanDoneMsg struct {
@@ -72,6 +76,16 @@ type dupesCleanDoneMsg struct {
 	freed   int64
 }
 
+type uninstallScanDoneMsg struct {
+	targets []scanner.Target
+}
+
+type uninstallCleanDoneMsg struct {
+	deleted int
+	failed  int
+	freed   int64
+}
+
 // menuItem represents a main menu option.
 type menuItem struct {
 	label       string
@@ -83,6 +97,7 @@ var menuItems = []menuItem{
 	{"Space Lens", "Visualize disk space usage"},
 	{"Maintenance", "Run system maintenance tasks"},
 	{"Duplicates", "Find and remove duplicate files"},
+	{"Uninstall", "Remove apps and all related files"},
 }
 
 type Model struct {
@@ -129,6 +144,17 @@ type Model struct {
 	dupFailed       int
 	dupFreed        int64
 
+	// Uninstall state
+	uiTextInput    textinput.Model
+	uiTargets      []scanner.Target
+	uiLoading      bool
+	uiCursor       int
+	uiScrollOffset int
+	uiSelected     map[int]bool
+	uiDeleted      int
+	uiFailed       int
+	uiFreed        int64
+
 	spinner spinner.Model
 
 	width  int
@@ -140,11 +166,18 @@ func New(e *engine.Engine) Model {
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("170"))
 
+	ti := textinput.New()
+	ti.Placeholder = "Enter app name..."
+	ti.CharLimit = 100
+	ti.Width = 40
+
 	return Model{
-		engine:   e,
-		selected: make(map[int]bool),
-		spinner:  sp,
-		slPath:   "/",
+		engine:      e,
+		selected:    make(map[int]bool),
+		spinner:     sp,
+		slPath:      "/",
+		uiTextInput: ti,
+		uiSelected:  make(map[int]bool),
 	}
 }
 
@@ -204,7 +237,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.scanning || m.slLoading || m.dupLoading || m.currentView == viewMaintain {
+		if m.scanning || m.slLoading || m.dupLoading || m.uiLoading || m.currentView == viewMaintain {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -290,9 +323,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentView = viewDupesResult
 		return m, nil
 
+	case uninstallScanDoneMsg:
+		m.uiLoading = false
+		m.uiTargets = msg.targets
+		m.uiCursor = 0
+		m.uiScrollOffset = 0
+		m.uiSelected = make(map[int]bool)
+		for i := range msg.targets {
+			m.uiSelected[i] = true
+		}
+		m.currentView = viewUninstallResults
+		return m, nil
+
+	case uninstallCleanDoneMsg:
+		m.uiDeleted = msg.deleted
+		m.uiFailed = msg.failed
+		m.uiFreed = msg.freed
+		// Re-use viewResult for the uninstall result display.
+		m.lastCleaned = msg.deleted
+		m.lastFailed = msg.failed
+		m.lastSize = msg.freed
+		m.currentView = viewResult
+		return m, nil
+
 	case tea.KeyMsg:
-		// Global quit
-		if msg.String() == "ctrl+c" || msg.String() == "q" {
+		// Global quit (skip "q" when user is typing in text input).
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+		if msg.String() == "q" && !(m.currentView == viewUninstallInput && !m.uiLoading) {
 			return m, tea.Quit
 		}
 
@@ -321,6 +380,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateDupesConfirm(msg)
 		case viewDupesResult:
 			return m.updateDupesResult(msg)
+		case viewUninstallInput:
+			return m.updateUninstallInput(msg)
+		case viewUninstallResults:
+			return m.updateUninstallResults(msg)
+		case viewUninstallConfirm:
+			return m.updateUninstallConfirm(msg)
+		}
+
+	default:
+		// Forward cursor blink and other messages to the text input when active.
+		if m.currentView == viewUninstallInput && !m.uiLoading {
+			var cmd tea.Cmd
+			m.uiTextInput, cmd = m.uiTextInput.Update(msg)
+			return m, cmd
 		}
 	}
 
@@ -365,6 +438,13 @@ func (m Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.dupCancel = cancel
 			m.dupProgressCh = ch
 			return m, tea.Batch(cmd, m.spinner.Tick)
+		case 4: // Uninstall
+			m.uiTextInput.Reset()
+			m.uiTextInput.Focus()
+			m.uiTargets = nil
+			m.uiSelected = make(map[int]bool)
+			m.currentView = viewUninstallInput
+			return m, m.uiTextInput.Cursor.BlinkCmd()
 		}
 	}
 	return m, nil
@@ -783,6 +863,111 @@ func (m Model) doDupesClean() tea.Cmd {
 	}
 }
 
+func (m Model) updateUninstallInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		appName := m.uiTextInput.Value()
+		if appName == "" {
+			return m, nil
+		}
+		m.uiLoading = true
+		return m, tea.Batch(m.doUninstallScan(appName), m.spinner.Tick)
+	case "esc":
+		m.currentView = viewMenu
+		m.cursor = 4
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.uiTextInput, cmd = m.uiTextInput.Update(msg)
+	return m, cmd
+}
+
+func (m Model) doUninstallScan(appName string) tea.Cmd {
+	return func() tea.Msg {
+		s := scanner.NewAppScanner("", "")
+		targets, _ := s.FindRelatedFiles(context.Background(), appName)
+		return uninstallScanDoneMsg{targets: targets}
+	}
+}
+
+func (m Model) updateUninstallResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.uiCursor > 0 {
+			m.uiCursor--
+			m.uiEnsureCursorVisible()
+		}
+	case "down", "j":
+		if m.uiCursor < len(m.uiTargets)-1 {
+			m.uiCursor++
+			m.uiEnsureCursorVisible()
+		}
+	case " ":
+		if m.uiSelected[m.uiCursor] {
+			delete(m.uiSelected, m.uiCursor)
+		} else {
+			m.uiSelected[m.uiCursor] = true
+		}
+	case "a":
+		if len(m.uiSelected) == len(m.uiTargets) {
+			m.uiSelected = make(map[int]bool)
+		} else {
+			for i := range m.uiTargets {
+				m.uiSelected[i] = true
+			}
+		}
+	case "d", "enter":
+		if len(m.uiSelected) > 0 {
+			m.currentView = viewUninstallConfirm
+		}
+	case "esc", "backspace":
+		m.uiTextInput.Focus()
+		m.currentView = viewUninstallInput
+		return m, m.uiTextInput.Cursor.BlinkCmd()
+	}
+	return m, nil
+}
+
+func (m *Model) uiEnsureCursorVisible() {
+	visible := m.visibleItemCount()
+	if m.uiCursor < m.uiScrollOffset {
+		m.uiScrollOffset = m.uiCursor
+	}
+	if m.uiCursor >= m.uiScrollOffset+visible {
+		m.uiScrollOffset = m.uiCursor - visible + 1
+	}
+}
+
+func (m Model) updateUninstallConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y":
+		return m, m.doUninstallClean()
+	case "n", "esc", "backspace":
+		m.currentView = viewUninstallResults
+	}
+	return m, nil
+}
+
+func (m Model) doUninstallClean() tea.Cmd {
+	return func() tea.Msg {
+		var deleted, failed int
+		var freed int64
+		for i, t := range m.uiTargets {
+			if !m.uiSelected[i] {
+				continue
+			}
+			if err := trash.MoveToTrash(t.Path); err != nil {
+				failed++
+			} else {
+				deleted++
+				freed += t.Size
+			}
+		}
+		return uninstallCleanDoneMsg{deleted: deleted, failed: failed, freed: freed}
+	}
+}
+
 func (m Model) doClean() tea.Cmd {
 	return func() tea.Msg {
 		if m.categoryIdx >= len(m.results) {
@@ -838,6 +1023,12 @@ func (m Model) View() string {
 		return m.viewDupesConfirm()
 	case viewDupesResult:
 		return m.viewDupesResult()
+	case viewUninstallInput:
+		return m.viewUninstallInput()
+	case viewUninstallResults:
+		return m.viewUninstallResults()
+	case viewUninstallConfirm:
+		return m.viewUninstallConfirm()
 	default:
 		return m.viewMenu()
 	}
@@ -1252,6 +1443,101 @@ func (m Model) viewDupesResult() string {
 	}
 
 	s += helpStyle.Render("\n  r re-scan | esc menu | q quit")
+	return s
+}
+
+func (m Model) viewUninstallInput() string {
+	s := titleStyle.Render("macbroom -- Uninstall") + "\n\n"
+
+	if m.uiLoading {
+		s += m.spinner.View() + " Searching for app files...\n"
+		return s
+	}
+
+	s += "  Enter the name of the application to uninstall:\n\n"
+	s += "  " + m.uiTextInput.View() + "\n"
+	s += helpStyle.Render("\n\nenter search | esc back | q quit")
+	return s
+}
+
+func (m Model) viewUninstallResults() string {
+	s := titleStyle.Render("macbroom -- Uninstall") + "\n\n"
+
+	if len(m.uiTargets) == 0 {
+		s += fmt.Sprintf("  No files found for %q.\n", m.uiTextInput.Value())
+		return s + helpStyle.Render("\nesc search again | q quit")
+	}
+
+	s += dimStyle.Render(fmt.Sprintf("  Found %d items for %q", len(m.uiTargets), m.uiTextInput.Value())) + "\n\n"
+
+	visible := m.visibleItemCount()
+	total := len(m.uiTargets)
+	end := m.uiScrollOffset + visible
+	if end > total {
+		end = total
+	}
+
+	for i := m.uiScrollOffset; i < end; i++ {
+		t := m.uiTargets[i]
+		cursor := "  "
+		if i == m.uiCursor {
+			cursor = "> "
+		}
+
+		check := "[ ]"
+		if m.uiSelected[i] {
+			check = "[x]"
+		}
+
+		line := fmt.Sprintf("%s%s %-35s %10s",
+			cursor, check, truncPath(t.Path, 35), utils.FormatSize(t.Size))
+
+		if i == m.uiCursor {
+			s += selectedStyle.Render(line) + "\n"
+		} else {
+			s += line + "\n"
+		}
+	}
+
+	if total > visible {
+		s += dimStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.uiScrollOffset+1, end, total)) + "\n"
+	}
+
+	var selectedSize int64
+	var selectedCount int
+	for i, t := range m.uiTargets {
+		if m.uiSelected[i] {
+			selectedSize += t.Size
+			selectedCount++
+		}
+	}
+
+	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Selected: %d items (%s) ", selectedCount, utils.FormatSize(selectedSize)))
+	s += helpStyle.Render("\n\nj/k navigate | space toggle | a toggle all | d delete | esc back | q quit")
+	return s
+}
+
+func (m Model) viewUninstallConfirm() string {
+	dangerStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("196")).
+		Background(lipgloss.Color("52")).
+		Padding(0, 1)
+
+	s := dangerStyle.Render(" CONFIRM UNINSTALL ") + "\n\n"
+
+	var selectedSize int64
+	var selectedCount int
+	for i, t := range m.uiTargets {
+		if m.uiSelected[i] {
+			selectedSize += t.Size
+			selectedCount++
+			s += fmt.Sprintf("  %s (%s)\n", truncPath(t.Path, 50), utils.FormatSize(t.Size))
+		}
+	}
+
+	s += fmt.Sprintf("\n  %d items | %s | will be moved to Trash (recoverable)\n", selectedCount, utils.FormatSize(selectedSize))
+	s += helpStyle.Render("\n  y confirm | n cancel | q quit")
 	return s
 }
 
