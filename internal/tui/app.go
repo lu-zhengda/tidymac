@@ -251,7 +251,7 @@ func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.currentView = viewCategory
 		}
-	case "escape", "backspace":
+	case "esc", "backspace":
 		m.currentView = viewMenu
 		m.cursor = 0
 	}
@@ -292,7 +292,7 @@ func (m Model) updateCategory(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.selected) > 0 {
 			m.currentView = viewConfirm
 		}
-	case "escape", "backspace":
+	case "esc", "backspace":
 		m.currentView = viewDashboard
 		m.cursor = m.categoryIdx
 	}
@@ -322,7 +322,7 @@ func (m Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y":
 		return m, m.doClean()
-	case "n", "escape", "backspace":
+	case "n", "esc", "backspace":
 		m.currentView = viewCategory
 	}
 	return m, nil
@@ -335,7 +335,7 @@ func (m Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.currentView = viewDashboard
 		m.cursor = 0
 		return m, tea.Batch(m.doScan(), m.spinner.Tick)
-	case "escape", "backspace":
+	case "esc", "backspace":
 		m.currentView = viewMenu
 		m.cursor = 0
 	}
@@ -374,7 +374,7 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.slCursor = 0
 			return m, tea.Batch(m.doSpaceLens(), m.spinner.Tick)
 		}
-	case "escape", "backspace":
+	case "esc", "backspace":
 		m.currentView = viewMenu
 		m.cursor = 1
 	}
@@ -383,7 +383,7 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) updateMaintainResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "escape", "backspace", "enter":
+	case "esc", "backspace", "enter":
 		m.currentView = viewMenu
 		m.cursor = 2
 	}
