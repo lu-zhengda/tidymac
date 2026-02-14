@@ -10,11 +10,7 @@ import (
 	"github.com/lu-zhengda/tidymac/internal/utils"
 )
 
-type spaceLensDoneMsg struct {
-	nodes []scanner.SpaceLensNode
-	path  string
-}
-
+// SpaceLensModel is the standalone Space Lens TUI (used by `spacelens -i`).
 type SpaceLensModel struct {
 	path    string
 	nodes   []scanner.SpaceLensNode
@@ -72,9 +68,8 @@ func (m SpaceLensModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.doAnalyze()
 			}
 		case "backspace", "h":
-			lastSlash := strings.LastIndex(m.path, "/")
-			if lastSlash > 0 {
-				m.path = m.path[:lastSlash]
+			if idx := lastSlash(m.path); idx > 0 {
+				m.path = m.path[:idx]
 				m.loading = true
 				m.cursor = 0
 				return m, m.doAnalyze()

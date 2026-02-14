@@ -1,7 +1,6 @@
 package maintain
 
 import (
-	"fmt"
 	"os/exec"
 )
 
@@ -40,7 +39,6 @@ func RunAll() []Result {
 	tasks := AvailableTasks()
 	results := make([]Result, 0, len(tasks))
 	for _, task := range tasks {
-		fmt.Printf("Running: %s...\n", task.Name)
 		results = append(results, Run(task))
 	}
 	return results

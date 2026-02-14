@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/lu-zhengda/tidymac/internal/engine"
+	"github.com/lu-zhengda/tidymac/internal/maintain"
 	"github.com/lu-zhengda/tidymac/internal/scanner"
 	"github.com/lu-zhengda/tidymac/internal/trash"
 	"github.com/lu-zhengda/tidymac/internal/utils"
@@ -16,10 +17,14 @@ import (
 type viewState int
 
 const (
-	viewDashboard viewState = iota
+	viewMenu viewState = iota
+	viewDashboard
 	viewCategory
 	viewConfirm
 	viewResult
+	viewSpaceLens
+	viewMaintain
+	viewMaintainResult
 )
 
 type scanDoneMsg struct {
@@ -32,6 +37,27 @@ type cleanDoneMsg struct {
 	size    int64
 }
 
+type spaceLensDoneMsg struct {
+	nodes []scanner.SpaceLensNode
+	path  string
+}
+
+type maintainDoneMsg struct {
+	results []maintain.Result
+}
+
+// menuItem represents a main menu option.
+type menuItem struct {
+	label       string
+	description string
+}
+
+var menuItems = []menuItem{
+	{"Clean", "Scan and remove junk files"},
+	{"Space Lens", "Visualize disk space usage"},
+	{"Maintenance", "Run system maintenance tasks"},
+}
+
 type Model struct {
 	engine      *engine.Engine
 	currentView viewState
@@ -42,11 +68,21 @@ type Model struct {
 
 	categoryIdx    int
 	categoryCursor int
+	scrollOffset   int
 
 	// Result view state
 	lastCleaned int
 	lastFailed  int
 	lastSize    int64
+
+	// Space Lens state
+	slPath    string
+	slNodes   []scanner.SpaceLensNode
+	slCursor  int
+	slLoading bool
+
+	// Maintenance state
+	maintainResults []maintain.Result
 
 	spinner spinner.Model
 
@@ -62,19 +98,35 @@ func New(e *engine.Engine) Model {
 	return Model{
 		engine:   e,
 		selected: make(map[int]bool),
-		scanning: true,
 		spinner:  sp,
+		slPath:   "/",
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.doScan(), m.spinner.Tick)
+	return m.spinner.Tick
 }
 
 func (m Model) doScan() tea.Cmd {
 	return func() tea.Msg {
 		results := m.engine.ScanGrouped(context.Background())
 		return scanDoneMsg{results: results}
+	}
+}
+
+func (m Model) doSpaceLens() tea.Cmd {
+	path := m.slPath
+	return func() tea.Msg {
+		sl := scanner.NewSpaceLens(path, 1)
+		nodes, _ := sl.Analyze(context.Background())
+		return spaceLensDoneMsg{nodes: nodes, path: path}
+	}
+}
+
+func (m Model) doMaintain() tea.Cmd {
+	return func() tea.Msg {
+		results := maintain.RunAll()
+		return maintainDoneMsg{results: results}
 	}
 }
 
@@ -86,7 +138,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.scanning {
+		if m.scanning || m.slLoading || m.currentView == viewMaintain {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -96,6 +148,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case scanDoneMsg:
 		m.scanning = false
 		m.results = msg.results
+		m.currentView = viewDashboard
 		return m, nil
 
 	case cleanDoneMsg:
@@ -105,94 +158,235 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentView = viewResult
 		return m, nil
 
+	case spaceLensDoneMsg:
+		m.slLoading = false
+		m.slNodes = msg.nodes
+		m.slPath = msg.path
+		return m, nil
+
+	case maintainDoneMsg:
+		m.maintainResults = msg.results
+		m.currentView = viewMaintainResult
+		return m, nil
+
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+c", "q":
-			if m.currentView == viewDashboard {
-				return m, tea.Quit
-			}
-			m.currentView = viewDashboard
-			m.cursor = 0
-			return m, nil
-
-		case "up", "k":
-			if m.currentView == viewDashboard && m.cursor > 0 {
-				m.cursor--
-			} else if m.currentView == viewCategory && m.categoryCursor > 0 {
-				m.categoryCursor--
-			}
-
-		case "down", "j":
-			if m.currentView == viewDashboard && m.cursor < len(m.results)-1 {
-				m.cursor++
-			} else if m.currentView == viewCategory {
-				if m.categoryIdx < len(m.results) {
-					max := len(m.results[m.categoryIdx].Targets) - 1
-					if m.categoryCursor < max {
-						m.categoryCursor++
-					}
-				}
-			}
-
-		case "enter":
-			if m.currentView == viewDashboard && len(m.results) > 0 {
-				m.categoryIdx = m.cursor
-				m.categoryCursor = 0
-				m.selected = make(map[int]bool)
-				if m.categoryIdx < len(m.results) {
-					for i := range m.results[m.categoryIdx].Targets {
-						m.selected[i] = true
-					}
-				}
-				m.currentView = viewCategory
-			} else if m.currentView == viewCategory {
-				m.currentView = viewConfirm
-			}
-
-		case " ":
-			if m.currentView == viewCategory {
-				if m.selected[m.categoryCursor] {
-					delete(m.selected, m.categoryCursor)
-				} else {
-					m.selected[m.categoryCursor] = true
-				}
-			}
-
-		case "d":
-			if m.currentView == viewCategory && len(m.selected) > 0 {
-				m.currentView = viewConfirm
-			}
-
-		case "y":
-			if m.currentView == viewConfirm {
-				return m, m.doClean()
-			}
-
-		case "n":
-			if m.currentView == viewConfirm {
-				m.currentView = viewCategory
-			}
-
-		case "escape":
-			if m.currentView != viewDashboard {
-				m.currentView = viewDashboard
-			}
-
-		case "r":
-			if m.currentView == viewResult {
-				m.scanning = true
-				m.currentView = viewDashboard
-				m.cursor = 0
-				return m, tea.Batch(m.doScan(), m.spinner.Tick)
-			}
+		// Global quit
+		if msg.String() == "ctrl+c" || msg.String() == "q" {
+			return m, tea.Quit
 		}
 
-		// In result view, any key except q goes back to re-scan
-		if m.currentView == viewResult && msg.String() != "q" && msg.String() != "ctrl+c" && msg.String() != "r" {
-			// allow q to quit handled above
+		switch m.currentView {
+		case viewMenu:
+			return m.updateMenu(msg)
+		case viewDashboard:
+			return m.updateDashboard(msg)
+		case viewCategory:
+			return m.updateCategory(msg)
+		case viewConfirm:
+			return m.updateConfirm(msg)
+		case viewResult:
+			return m.updateResult(msg)
+		case viewSpaceLens:
+			return m.updateSpaceLens(msg)
+		case viewMaintain:
+			// waiting for results, no input
+		case viewMaintainResult:
+			return m.updateMaintainResult(msg)
 		}
 	}
 
+	return m, nil
+}
+
+func (m Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case "down", "j":
+		if m.cursor < len(menuItems)-1 {
+			m.cursor++
+		}
+	case "enter":
+		switch m.cursor {
+		case 0: // Clean
+			m.scanning = true
+			m.currentView = viewDashboard
+			return m, tea.Batch(m.doScan(), m.spinner.Tick)
+		case 1: // Space Lens
+			m.slLoading = true
+			m.slCursor = 0
+			m.slPath = "/"
+			m.currentView = viewSpaceLens
+			return m, tea.Batch(m.doSpaceLens(), m.spinner.Tick)
+		case 2: // Maintenance
+			m.currentView = viewMaintain
+			return m, tea.Batch(m.doMaintain(), m.spinner.Tick)
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case "down", "j":
+		if m.cursor < len(m.results)-1 {
+			m.cursor++
+		}
+	case "enter":
+		if len(m.results) > 0 {
+			m.categoryIdx = m.cursor
+			m.categoryCursor = 0
+			m.scrollOffset = 0
+			m.selected = make(map[int]bool)
+			if m.categoryIdx < len(m.results) {
+				for i := range m.results[m.categoryIdx].Targets {
+					m.selected[i] = true
+				}
+			}
+			m.currentView = viewCategory
+		}
+	case "escape", "backspace":
+		m.currentView = viewMenu
+		m.cursor = 0
+	}
+	return m, nil
+}
+
+func (m Model) updateCategory(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.categoryCursor > 0 {
+			m.categoryCursor--
+			m.ensureCursorVisible()
+		}
+	case "down", "j":
+		if m.categoryIdx < len(m.results) {
+			max := len(m.results[m.categoryIdx].Targets) - 1
+			if m.categoryCursor < max {
+				m.categoryCursor++
+				m.ensureCursorVisible()
+			}
+		}
+	case " ":
+		if m.selected[m.categoryCursor] {
+			delete(m.selected, m.categoryCursor)
+		} else {
+			m.selected[m.categoryCursor] = true
+		}
+	case "a":
+		// Toggle all
+		if len(m.selected) == len(m.results[m.categoryIdx].Targets) {
+			m.selected = make(map[int]bool)
+		} else {
+			for i := range m.results[m.categoryIdx].Targets {
+				m.selected[i] = true
+			}
+		}
+	case "d", "enter":
+		if len(m.selected) > 0 {
+			m.currentView = viewConfirm
+		}
+	case "escape", "backspace":
+		m.currentView = viewDashboard
+		m.cursor = m.categoryIdx
+	}
+	return m, nil
+}
+
+func (m *Model) ensureCursorVisible() {
+	visible := m.visibleItemCount()
+	if m.categoryCursor < m.scrollOffset {
+		m.scrollOffset = m.categoryCursor
+	}
+	if m.categoryCursor >= m.scrollOffset+visible {
+		m.scrollOffset = m.categoryCursor - visible + 1
+	}
+}
+
+func (m Model) visibleItemCount() int {
+	// Reserve lines for: title(2) + status bar(1) + help(2) + padding(1) = 6
+	available := m.height - 6
+	if available < 5 {
+		available = 5
+	}
+	return available
+}
+
+func (m Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y":
+		return m, m.doClean()
+	case "n", "escape", "backspace":
+		m.currentView = viewCategory
+	}
+	return m, nil
+}
+
+func (m Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "r":
+		m.scanning = true
+		m.currentView = viewDashboard
+		m.cursor = 0
+		return m, tea.Batch(m.doScan(), m.spinner.Tick)
+	case "escape", "backspace":
+		m.currentView = viewMenu
+		m.cursor = 0
+	}
+	return m, nil
+}
+
+func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.slLoading {
+		return m, nil
+	}
+	switch msg.String() {
+	case "up", "k":
+		if m.slCursor > 0 {
+			m.slCursor--
+		}
+	case "down", "j":
+		max := len(m.slNodes) - 1
+		if max > 29 {
+			max = 29
+		}
+		if m.slCursor < max {
+			m.slCursor++
+		}
+	case "enter":
+		if m.slCursor < len(m.slNodes) && m.slNodes[m.slCursor].IsDir {
+			m.slPath = m.slNodes[m.slCursor].Path
+			m.slLoading = true
+			m.slCursor = 0
+			return m, tea.Batch(m.doSpaceLens(), m.spinner.Tick)
+		}
+	case "h":
+		// Go up one directory
+		if idx := lastSlash(m.slPath); idx > 0 {
+			m.slPath = m.slPath[:idx]
+			m.slLoading = true
+			m.slCursor = 0
+			return m, tea.Batch(m.doSpaceLens(), m.spinner.Tick)
+		}
+	case "escape", "backspace":
+		m.currentView = viewMenu
+		m.cursor = 1
+	}
+	return m, nil
+}
+
+func (m Model) updateMaintainResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "escape", "backspace", "enter":
+		m.currentView = viewMenu
+		m.cursor = 2
+	}
 	return m, nil
 }
 
@@ -219,29 +413,56 @@ func (m Model) doClean() tea.Cmd {
 	}
 }
 
+// --- Views ---
+
 func (m Model) View() string {
 	if m.scanning {
 		return titleStyle.Render("tidymac") + "\n\n" + m.spinner.View() + " Scanning your Mac...\n"
 	}
 
 	switch m.currentView {
+	case viewMenu:
+		return m.viewMenu()
+	case viewDashboard:
+		return m.viewDashboard()
 	case viewCategory:
 		return m.viewCategory()
 	case viewConfirm:
 		return m.viewConfirm()
 	case viewResult:
 		return m.viewResult()
+	case viewSpaceLens:
+		return m.viewSpaceLens()
+	case viewMaintain:
+		return m.viewMaintain()
+	case viewMaintainResult:
+		return m.viewMaintainResult()
 	default:
-		return m.viewDashboard()
+		return m.viewMenu()
 	}
 }
 
+func (m Model) viewMenu() string {
+	s := titleStyle.Render("tidymac") + "\n\n"
+
+	for i, item := range menuItems {
+		if i == m.cursor {
+			s += selectedStyle.Render("> "+item.label) + "  " + dimStyle.Render(item.description) + "\n"
+		} else {
+			s += fmt.Sprintf("  %-15s %s\n", item.label, dimStyle.Render(item.description))
+		}
+	}
+
+	s += helpStyle.Render("\n\nj/k navigate | enter select | q quit")
+	return s
+}
+
 func (m Model) viewDashboard() string {
-	s := titleStyle.Render("tidymac -- Dashboard") + "\n\n"
+	s := titleStyle.Render("tidymac -- Clean") + "\n\n"
 
 	if len(m.results) == 0 {
 		s += "No junk found. Your Mac is clean!\n"
-		return s + helpStyle.Render("\nq quit")
+		return s + helpStyle.Render("\nesc back | q quit")
 	}
 
 	var totalSize int64
@@ -265,7 +486,7 @@ func (m Model) viewDashboard() string {
 	}
 
 	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Total reclaimable: %s ", utils.FormatSize(totalSize)))
-	s += helpStyle.Render("\n\nj/k navigate | enter view details | q quit")
+	s += helpStyle.Render("\n\nj/k navigate | enter view details | esc back | q quit")
 	return s
 }
 
@@ -282,7 +503,15 @@ func (m Model) viewCategory() string {
 		return s
 	}
 
-	for i, t := range r.Targets {
+	visible := m.visibleItemCount()
+	total := len(r.Targets)
+	end := m.scrollOffset + visible
+	if end > total {
+		end = total
+	}
+
+	for i := m.scrollOffset; i < end; i++ {
+		t := r.Targets[i]
 		cursor := "  "
 		if i == m.categoryCursor {
 			cursor = "> "
@@ -303,6 +532,11 @@ func (m Model) viewCategory() string {
 		}
 	}
 
+	// Scroll indicator
+	if total > visible {
+		s += dimStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.scrollOffset+1, end, total)) + "\n"
+	}
+
 	var selectedSize int64
 	var selectedCount int
 	for i, t := range r.Targets {
@@ -313,7 +547,7 @@ func (m Model) viewCategory() string {
 	}
 
 	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Selected: %d items (%s) ", selectedCount, utils.FormatSize(selectedSize)))
-	s += helpStyle.Render("\n\nj/k navigate | space toggle | d delete selected | esc back | q quit")
+	s += helpStyle.Render("\n\nj/k navigate | space toggle | a toggle all | d delete | esc back | q quit")
 	return s
 }
 
@@ -358,7 +592,7 @@ func (m Model) viewConfirm() string {
 	}
 
 	s += fmt.Sprintf("  %d items | %s | will be moved to Trash (recoverable)\n", selectedCount, utils.FormatSize(selectedSize))
-	s += helpStyle.Render("\n  y confirm deletion | n cancel and go back")
+	s += helpStyle.Render("\n  y confirm | n cancel | q quit")
 	return s
 }
 
@@ -373,7 +607,88 @@ func (m Model) viewResult() string {
 		s += failStyle.Render(fmt.Sprintf("  Failed:  %d items", m.lastFailed)) + "\n"
 	}
 
-	s += helpStyle.Render("\n  r re-scan | q quit")
+	s += helpStyle.Render("\n  r re-scan | esc menu | q quit")
+	return s
+}
+
+func (m Model) viewSpaceLens() string {
+	s := titleStyle.Render("tidymac -- Space Lens") + "\n"
+	s += dimStyle.Render(m.slPath) + "\n\n"
+
+	if m.slLoading {
+		return s + m.spinner.View() + " Analyzing...\n"
+	}
+
+	if len(m.slNodes) == 0 {
+		s += "Empty directory.\n"
+		return s + helpStyle.Render("\nesc back | q quit")
+	}
+
+	maxSize := m.slNodes[0].Size
+	visible := m.slNodes
+	if len(visible) > 30 {
+		visible = visible[:30]
+	}
+
+	for i, node := range visible {
+		cursor := "  "
+		if i == m.slCursor {
+			cursor = "> "
+		}
+
+		icon := "  "
+		if node.IsDir {
+			icon = "D "
+		}
+
+		name := node.Name
+		if len(name) > 30 {
+			name = name[:27] + "..."
+		}
+
+		bar := renderBar(node.Size, maxSize, 25)
+		line := fmt.Sprintf("%s%s %-30s %10s %s",
+			cursor, icon, name, utils.FormatSize(node.Size), bar)
+
+		if i == m.slCursor {
+			s += selectedStyle.Render(line) + "\n"
+		} else {
+			s += line + "\n"
+		}
+	}
+
+	if len(m.slNodes) > 30 {
+		s += dimStyle.Render(fmt.Sprintf("\n  ... and %d more items", len(m.slNodes)-30)) + "\n"
+	}
+
+	s += helpStyle.Render("\nj/k navigate | enter drill in | h go up | esc back | q quit")
+	return s
+}
+
+func (m Model) viewMaintain() string {
+	s := titleStyle.Render("tidymac -- Maintenance") + "\n\n"
+	s += m.spinner.View() + " Running maintenance tasks...\n"
+	return s
+}
+
+func (m Model) viewMaintainResult() string {
+	s := titleStyle.Render("tidymac -- Maintenance Complete") + "\n\n"
+
+	successStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82"))
+	failStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
+	skipStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+
+	for _, r := range m.maintainResults {
+		if r.Success {
+			s += successStyle.Render(fmt.Sprintf("  [OK]     %s", r.Task.Name)) + "\n"
+		} else if r.Task.NeedsSudo {
+			s += skipStyle.Render(fmt.Sprintf("  [SKIP]   %s (requires sudo)", r.Task.Name)) + "\n"
+		} else {
+			s += failStyle.Render(fmt.Sprintf("  [FAIL]   %s: %v", r.Task.Name, r.Error)) + "\n"
+		}
+	}
+
+	s += helpStyle.Render("\n\nesc back | q quit")
 	return s
 }
 
@@ -382,4 +697,13 @@ func truncPath(path string, maxLen int) string {
 		return path
 	}
 	return "..." + path[len(path)-maxLen+3:]
+}
+
+func lastSlash(s string) int {
+	for i := len(s) - 1; i >= 0; i-- {
+		if s[i] == '/' {
+			return i
+		}
+	}
+	return -1
 }
