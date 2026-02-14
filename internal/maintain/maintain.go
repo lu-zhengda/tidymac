@@ -25,7 +25,7 @@ func AvailableTasks() []Task {
 		{Name: "Kill DNS Responder", Description: "Restart mDNSResponder to apply DNS flush", Command: "sudo", Args: []string{"killall", "-HUP", "mDNSResponder"}, NeedsSudo: true},
 		{Name: "Rebuild Spotlight Index", Description: "Re-index Spotlight for faster search", Command: "sudo", Args: []string{"mdutil", "-E", "/"}, NeedsSudo: true},
 		{Name: "Purge Inactive Memory", Description: "Free up inactive memory", Command: "sudo", Args: []string{"purge"}, NeedsSudo: true},
-		{Name: "Rebuild Launch Services", Description: "Fix duplicate entries in Open With menus", Command: "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister", Args: []string{"-kill", "-r", "-domain", "local", "-domain", "system", "-domain", "user"}, NeedsSudo: false},
+		{Name: "Rebuild Launch Services", Description: "Fix duplicate entries in Open With menus", Command: "/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister", Args: []string{"-r", "-domain", "local", "-domain", "system", "-domain", "user"}, NeedsSudo: false},
 	}
 }
 
