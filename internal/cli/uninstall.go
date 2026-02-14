@@ -13,6 +13,7 @@ import (
 var (
 	uninstallPermanent bool
 	uninstallYes       bool
+	uninstallDryRun    bool
 )
 
 var uninstallCmd = &cobra.Command{
@@ -39,6 +40,16 @@ var uninstallCmd = &cobra.Command{
 		var totalSize int64
 		for _, t := range targets {
 			totalSize += t.Size
+		}
+
+		if uninstallDryRun {
+			action := "move"
+			if uninstallPermanent {
+				action = "permanently delete"
+			}
+			fmt.Printf("\n[DRY RUN] Would %s %d items (%s).\n", action, len(targets), utils.FormatSize(totalSize))
+			fmt.Println("[DRY RUN] No files were deleted.")
+			return nil
 		}
 
 		printYoloWarning()
@@ -77,4 +88,5 @@ var uninstallCmd = &cobra.Command{
 func init() {
 	uninstallCmd.Flags().BoolVar(&uninstallPermanent, "permanent", false, "Permanently delete instead of moving to Trash")
 	uninstallCmd.Flags().BoolVarP(&uninstallYes, "yes", "y", false, "Skip confirmation prompt")
+	uninstallCmd.Flags().BoolVar(&uninstallDryRun, "dry-run", false, "Show what would be deleted without actually deleting")
 }

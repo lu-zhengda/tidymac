@@ -11,6 +11,7 @@ import (
 var (
 	cleanPermanent  bool
 	cleanYes        bool
+	cleanDryRun     bool
 	cleanSystem     bool
 	cleanBrowser    bool
 	cleanXcode      bool
@@ -44,6 +45,16 @@ var cleanCmd = &cobra.Command{
 		var totalSize int64
 		for _, t := range targets {
 			totalSize += t.Size
+		}
+
+		if cleanDryRun {
+			action := "move"
+			if cleanPermanent {
+				action = "permanently delete"
+			}
+			fmt.Printf("\n[DRY RUN] Would %s %d items (%s).\n", action, len(targets), utils.FormatSize(totalSize))
+			fmt.Println("[DRY RUN] No files were deleted.")
+			return nil
 		}
 
 		printYoloWarning()
@@ -90,6 +101,7 @@ var cleanCmd = &cobra.Command{
 func init() {
 	cleanCmd.Flags().BoolVar(&cleanPermanent, "permanent", false, "Permanently delete instead of moving to Trash")
 	cleanCmd.Flags().BoolVarP(&cleanYes, "yes", "y", false, "Skip confirmation prompt")
+	cleanCmd.Flags().BoolVar(&cleanDryRun, "dry-run", false, "Show what would be deleted without actually deleting")
 	cleanCmd.Flags().BoolVar(&cleanSystem, "system", false, "Clean system junk only")
 	cleanCmd.Flags().BoolVar(&cleanBrowser, "browser", false, "Clean browser caches only")
 	cleanCmd.Flags().BoolVar(&cleanXcode, "xcode", false, "Clean Xcode junk only")
