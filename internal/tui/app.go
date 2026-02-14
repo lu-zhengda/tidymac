@@ -125,7 +125,7 @@ func (m Model) doSpaceLens() tea.Cmd {
 
 func (m Model) doMaintain() tea.Cmd {
 	return func() tea.Msg {
-		results := maintain.RunAll()
+		results := maintain.RunSafe()
 		return maintainDoneMsg{results: results}
 	}
 }
@@ -688,7 +688,18 @@ func (m Model) viewMaintainResult() string {
 		}
 	}
 
-	s += helpStyle.Render("\n\nesc back | q quit")
+	hasSudo := false
+	for _, r := range m.maintainResults {
+		if r.Task.NeedsSudo {
+			hasSudo = true
+			break
+		}
+	}
+	if hasSudo {
+		s += dimStyle.Render("\n  Tip: run 'macbroom maintain' in terminal for sudo tasks") + "\n"
+	}
+
+	s += helpStyle.Render("\nesc back | q quit")
 	return s
 }
 
