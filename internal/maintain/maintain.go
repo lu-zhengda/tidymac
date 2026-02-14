@@ -43,3 +43,18 @@ func RunAll() []Result {
 	}
 	return results
 }
+
+// RunSafe runs only tasks that don't require sudo.
+// Use this in TUI mode where sudo prompts can't work.
+func RunSafe() []Result {
+	tasks := AvailableTasks()
+	results := make([]Result, 0, len(tasks))
+	for _, task := range tasks {
+		if task.NeedsSudo {
+			results = append(results, Result{Task: task, Success: false})
+			continue
+		}
+		results = append(results, Run(task))
+	}
+	return results
+}
