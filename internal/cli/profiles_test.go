@@ -63,17 +63,14 @@ func TestSelectedCategories_DevPlusDocker(t *testing.T) {
 		true, false, false,
 	)
 	sort.Strings(cats)
-	found := false
-	for _, c := range cats {
-		if c == "Docker" {
-			found = true
+	want := []string{"Docker", "Go", "Gradle", "JetBrains", "Maven", "Node.js", "Python", "Ruby", "Rust"}
+	if len(cats) != len(want) {
+		t.Fatalf("--dev --docker: got %v, want %v", cats, want)
+	}
+	for i := range want {
+		if cats[i] != want[i] {
+			t.Errorf("--dev --docker[%d]: got %q, want %q", i, cats[i], want[i])
 		}
-	}
-	if !found {
-		t.Error("--dev --docker should include Docker")
-	}
-	if len(cats) != 9 {
-		t.Errorf("expected 9 categories, got %d: %v", len(cats), cats)
 	}
 }
 
@@ -85,8 +82,14 @@ func TestSelectedCategories_DevAndCachesCombine(t *testing.T) {
 		true, true, false,
 	)
 	sort.Strings(cats)
-	if len(cats) != 11 {
-		t.Errorf("--dev --caches: expected 11 categories, got %d: %v", len(cats), cats)
+	want := []string{"Browser Cache", "Go", "Gradle", "Homebrew", "JetBrains", "Maven", "Node.js", "Python", "Ruby", "Rust", "System Junk"}
+	if len(cats) != len(want) {
+		t.Fatalf("--dev --caches: got %v, want %v", cats, want)
+	}
+	for i := range want {
+		if cats[i] != want[i] {
+			t.Errorf("--dev --caches[%d]: got %q, want %q", i, cats[i], want[i])
+		}
 	}
 }
 
