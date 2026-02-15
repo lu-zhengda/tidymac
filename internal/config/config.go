@@ -51,6 +51,9 @@ type ScannersConfig struct {
 	Rust          bool `yaml:"rust"`
 	Go            bool `yaml:"go"`
 	JetBrains     bool `yaml:"jetbrains"`
+	Maven         bool `yaml:"maven"`
+	Gradle        bool `yaml:"gradle"`
+	Ruby          bool `yaml:"ruby"`
 }
 
 // SpaceLensConfig controls the space-lens disk visualizer.
@@ -94,6 +97,9 @@ func Default() *Config {
 			Rust:          true,
 			Go:            true,
 			JetBrains:     true,
+			Maven:         true,
+			Gradle:        true,
+			Ruby:          true,
 		},
 		SpaceLens: SpaceLensConfig{
 			DefaultPath: "/",

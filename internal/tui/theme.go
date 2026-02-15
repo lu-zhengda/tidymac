@@ -37,6 +37,9 @@ var categoryColors = map[string]lipgloss.Color{
 	"Rust":              lipgloss.Color("208"),
 	"Go":                lipgloss.Color("75"),
 	"JetBrains":         lipgloss.Color("171"),
+	"Maven":             lipgloss.Color("167"),
+	"Gradle":            lipgloss.Color("108"),
+	"Ruby":              lipgloss.Color("161"),
 }
 
 // categoryColor returns the theme color for a scan category.

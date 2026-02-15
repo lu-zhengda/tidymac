@@ -111,6 +111,19 @@ func TestDefaultConfig_NewScanners(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_V04Scanners(t *testing.T) {
+	cfg := Default()
+	if !cfg.Scanners.Maven {
+		t.Error("expected Maven scanner enabled by default")
+	}
+	if !cfg.Scanners.Gradle {
+		t.Error("expected Gradle scanner enabled by default")
+	}
+	if !cfg.Scanners.Ruby {
+		t.Error("expected Ruby scanner enabled by default")
+	}
+}
+
 func TestLoadFromFile(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")

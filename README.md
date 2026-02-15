@@ -69,6 +69,12 @@ macbroom maintain
 macbroom schedule enable
 macbroom schedule disable
 macbroom schedule status
+
+# Use scan profiles
+macbroom scan --dev               # all dev-tool caches
+macbroom scan --caches            # system, browser, homebrew
+macbroom scan --all               # everything
+macbroom clean --dev --docker     # dev tools + Docker
 ```
 
 ### Flags
@@ -93,6 +99,12 @@ macbroom schedule status
 | `--rust` | scan, clean | Filter to Rust junk only |
 | `--go` | scan, clean | Filter to Go junk only |
 | `--jetbrains` | scan, clean | Filter to JetBrains junk only |
+| `--maven` | scan, clean | Filter to Maven cache only |
+| `--gradle` | scan, clean | Filter to Gradle cache only |
+| `--ruby` | scan, clean | Filter to Ruby cache only |
+| `--dev` | scan, clean | Scan all dev-tool caches |
+| `--caches` | scan, clean | Scan all general caches |
+| `--all` | scan, clean | Scan everything |
 | `--min-size` | dupes | Minimum file size for duplicate detection |
 | `--depth N` | spacelens | Directory depth (default 2) |
 | `-i` | spacelens | Interactive TUI mode |
@@ -113,6 +125,9 @@ macbroom schedule status
 | Rust | Cargo registry cache, stale `target/` directories | Safe-Moderate |
 | Go | Module cache, build cache | Safe |
 | JetBrains | IDE caches and logs (IntelliJ, GoLand, PyCharm, etc.) | Safe |
+| Maven | Local repository (`~/.m2/repository`) | Safe |
+| Gradle | Build caches, wrapper distributions | Safe |
+| Ruby | Gem cache, Bundler cache | Safe |
 | App Uninstall | App bundle + preferences, caches, support files | Moderate |
 | Orphaned Preferences | Plist files for uninstalled apps | Safe |
 | Duplicate Files | Identical files across Downloads, Desktop, Documents | Safe |
@@ -135,6 +150,9 @@ scanners:
   rust: true
   go: true
   jetbrains: true
+  maven: true
+  gradle: true
+  ruby: true
 
 large_files:
   min_size: 100MB
@@ -179,7 +197,7 @@ cmd/gendocs/         Man page generator
 internal/
   scanner/           Modular scanners (System, Browser, Xcode, Apps, LargeFiles,
                      SpaceLens, Docker, Node, Homebrew, Simulator, Python,
-                     Rust, Go, JetBrains)
+                     Rust, Go, JetBrains, Maven, Gradle, Ruby)
   engine/            Orchestrates scanners with worker pool and live progress
   cli/               Cobra commands and flags
   tui/               Bubbletea interactive UI with treemap visualization,

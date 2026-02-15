@@ -28,6 +28,12 @@ var (
 	cleanRust      bool
 	cleanGo        bool
 	cleanJetBrains bool
+	cleanMaven     bool
+	cleanGradle    bool
+	cleanRuby      bool
+	cleanDev       bool
+	cleanCaches    bool
+	cleanAll       bool
 )
 
 // cleanPrint prints to stdout only when --quiet is not set.
@@ -49,7 +55,7 @@ var cleanCmd = &cobra.Command{
 	Short: "Clean selected junk files",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e := buildEngine()
-		cats := selectedCategories(cleanSystem, cleanBrowser, cleanXcode, cleanLarge, cleanDocker, cleanNode, cleanHomebrew, cleanSimulator, cleanPython, cleanRust, cleanGo, cleanJetBrains)
+		cats := selectedCategories(cleanSystem, cleanBrowser, cleanXcode, cleanLarge, cleanDocker, cleanNode, cleanHomebrew, cleanSimulator, cleanPython, cleanRust, cleanGo, cleanJetBrains, cleanMaven, cleanGradle, cleanRuby, cleanDev, cleanCaches, cleanAll)
 
 		cleanPrintln("Scanning...")
 		targets, err := scanWithCategories(e, cats)
@@ -178,4 +184,10 @@ func init() {
 	cleanCmd.Flags().BoolVar(&cleanRust, "rust", false, "Clean Rust cache only")
 	cleanCmd.Flags().BoolVar(&cleanGo, "go", false, "Clean Go cache only")
 	cleanCmd.Flags().BoolVar(&cleanJetBrains, "jetbrains", false, "Clean JetBrains cache only")
+	cleanCmd.Flags().BoolVar(&cleanMaven, "maven", false, "Clean Maven cache only")
+	cleanCmd.Flags().BoolVar(&cleanGradle, "gradle", false, "Clean Gradle cache only")
+	cleanCmd.Flags().BoolVar(&cleanRuby, "ruby", false, "Clean Ruby cache only")
+	cleanCmd.Flags().BoolVar(&cleanDev, "dev", false, "Clean all dev-tool caches")
+	cleanCmd.Flags().BoolVar(&cleanCaches, "caches", false, "Clean all general caches")
+	cleanCmd.Flags().BoolVar(&cleanAll, "all", false, "Clean everything")
 }

@@ -156,12 +156,48 @@ func buildEngine() *engine.Engine {
 		home := utils.HomeDir()
 		e.Register(scanner.NewJetBrainsScanner(home))
 	}
+	if appConfig.Scanners.Maven {
+		home := utils.HomeDir()
+		e.Register(scanner.NewMavenScanner(home))
+	}
+	if appConfig.Scanners.Gradle {
+		home := utils.HomeDir()
+		e.Register(scanner.NewGradleScanner(home))
+	}
+	if appConfig.Scanners.Ruby {
+		home := utils.HomeDir()
+		e.Register(scanner.NewRubyScanner(home))
+	}
 
 	return e
 }
 
-func selectedCategories(system, browser, xcode, large, docker, node, homebrew, simulator, python, rust, golang, jetbrains bool) []string {
-	if !system && !browser && !xcode && !large && !docker && !node && !homebrew && !simulator && !python && !rust && !golang && !jetbrains {
+func selectedCategories(system, browser, xcode, large, docker, node, homebrew, simulator, python, rust, golang, jetbrains, maven, gradle, ruby, dev, caches, all bool) []string {
+	// --all overrides everything.
+	if all {
+		return nil
+	}
+
+	// Expand --dev profile.
+	if dev {
+		node = true
+		python = true
+		rust = true
+		golang = true
+		jetbrains = true
+		maven = true
+		gradle = true
+		ruby = true
+	}
+
+	// Expand --caches profile.
+	if caches {
+		system = true
+		browser = true
+		homebrew = true
+	}
+
+	if !system && !browser && !xcode && !large && !docker && !node && !homebrew && !simulator && !python && !rust && !golang && !jetbrains && !maven && !gradle && !ruby {
 		return nil
 	}
 	var cats []string
@@ -200,6 +236,15 @@ func selectedCategories(system, browser, xcode, large, docker, node, homebrew, s
 	}
 	if jetbrains {
 		cats = append(cats, "JetBrains")
+	}
+	if maven {
+		cats = append(cats, "Maven")
+	}
+	if gradle {
+		cats = append(cats, "Gradle")
+	}
+	if ruby {
+		cats = append(cats, "Ruby")
 	}
 	return cats
 }
