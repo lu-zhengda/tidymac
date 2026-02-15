@@ -7,4 +7,5 @@ completions/
 .DS_Store
 /macbroom
 docs/man/*.1
+docs/plans/
 .worktrees/
