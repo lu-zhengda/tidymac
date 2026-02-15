@@ -143,6 +143,15 @@ large_files:
     - ~/Downloads
     - ~/Desktop
 
+dev_tools:
+  search_paths:
+    - ~/Documents
+    - ~/Projects
+    - ~/src
+    - ~/code
+    - ~/Developer
+  min_age: 30d
+
 exclude:
   - "*.important"
   - "~/Documents/keep/**"

@@ -56,6 +56,17 @@ func TestDefaultConfig(t *testing.T) {
 		t.Error("expected Scanners.IOSSimulators to be true")
 	}
 
+	// DevTools defaults
+	if len(cfg.DevTools.SearchPaths) != 5 {
+		t.Fatalf("expected 5 DevTools search paths, got %d", len(cfg.DevTools.SearchPaths))
+	}
+	if cfg.DevTools.SearchPaths[0] != "~/Documents" {
+		t.Errorf("expected first DevTools path '~/Documents', got %q", cfg.DevTools.SearchPaths[0])
+	}
+	if cfg.DevTools.MinAge != "30d" {
+		t.Errorf("expected DevTools.MinAge '30d', got %q", cfg.DevTools.MinAge)
+	}
+
 	// SpaceLens defaults
 	if cfg.SpaceLens.DefaultPath != "/" {
 		t.Errorf("expected SpaceLens.DefaultPath '/', got %q", cfg.SpaceLens.DefaultPath)

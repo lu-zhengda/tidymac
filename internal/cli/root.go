@@ -126,8 +126,8 @@ func buildEngine() *engine.Engine {
 	}
 	if appConfig.Scanners.Node {
 		home := utils.HomeDir()
-		paths := expandPaths(appConfig.LargeFiles.Paths)
-		minAge := config.ParseDuration(appConfig.LargeFiles.MinAge)
+		paths := expandPaths(appConfig.DevTools.SearchPaths)
+		minAge := config.ParseDuration(appConfig.DevTools.MinAge)
 		e.Register(scanner.NewNodeScanner(home, paths, minAge))
 	}
 	if appConfig.Scanners.Homebrew {
@@ -138,14 +138,14 @@ func buildEngine() *engine.Engine {
 	}
 	if appConfig.Scanners.Python {
 		home := utils.HomeDir()
-		paths := expandPaths(appConfig.LargeFiles.Paths)
-		minAge := config.ParseDuration(appConfig.LargeFiles.MinAge)
+		paths := expandPaths(appConfig.DevTools.SearchPaths)
+		minAge := config.ParseDuration(appConfig.DevTools.MinAge)
 		e.Register(scanner.NewPythonScanner(home, paths, minAge))
 	}
 	if appConfig.Scanners.Rust {
 		home := utils.HomeDir()
-		paths := expandPaths(appConfig.LargeFiles.Paths)
-		minAge := config.ParseDuration(appConfig.LargeFiles.MinAge)
+		paths := expandPaths(appConfig.DevTools.SearchPaths)
+		minAge := config.ParseDuration(appConfig.DevTools.MinAge)
 		e.Register(scanner.NewRustScanner(home, paths, minAge))
 	}
 	if appConfig.Scanners.Go {

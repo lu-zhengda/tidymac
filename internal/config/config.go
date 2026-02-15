@@ -14,6 +14,7 @@ import (
 // Config holds all macbroom configuration.
 type Config struct {
 	LargeFiles LargeFilesConfig `yaml:"large_files"`
+	DevTools   DevToolsConfig   `yaml:"dev_tools"`
 	Exclude    []string         `yaml:"exclude"`
 	Scanners   ScannersConfig   `yaml:"scanners"`
 	SpaceLens  SpaceLensConfig  `yaml:"spacelens"`
@@ -26,6 +27,14 @@ type LargeFilesConfig struct {
 	MinSizeStr string   `yaml:"min_size"`
 	MinAge     string   `yaml:"min_age"`
 	Paths      []string `yaml:"paths"`
+}
+
+// DevToolsConfig controls search paths and staleness for dev-tool scanners
+// (Node.js, Python, Rust). These scanners walk directories looking for
+// stale build artifacts (node_modules, virtualenvs, target/).
+type DevToolsConfig struct {
+	SearchPaths []string `yaml:"search_paths"`
+	MinAge      string   `yaml:"min_age"`
 }
 
 // ScannersConfig toggles individual scanners on or off.
@@ -66,6 +75,10 @@ func Default() *Config {
 			MinSizeStr: "100MB",
 			MinAge:     "90d",
 			Paths:      []string{"~/Downloads", "~/Desktop"},
+		},
+		DevTools: DevToolsConfig{
+			SearchPaths: []string{"~/Documents", "~/Projects", "~/src", "~/code", "~/Developer"},
+			MinAge:      "30d",
 		},
 		Exclude: []string{},
 		Scanners: ScannersConfig{
