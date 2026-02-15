@@ -184,3 +184,85 @@ func buildStatsJSON(stats history.Stats) statsJSON {
 		Recent:        stats.Recent,
 	}
 }
+
+// ---------------------------------------------------------------------------
+// SpaceLens JSON type
+// ---------------------------------------------------------------------------
+
+type spaceLensJSON struct {
+	Version   string                `json:"version"`
+	Timestamp time.Time             `json:"timestamp"`
+	Path      string                `json:"path"`
+	Nodes     []scanner.SpaceLensNode `json:"nodes"`
+}
+
+// buildSpaceLensJSON converts spacelens analysis into a JSON-serializable structure.
+func buildSpaceLensJSON(path string, nodes []scanner.SpaceLensNode) spaceLensJSON {
+	return spaceLensJSON{
+		Version:   version,
+		Timestamp: time.Now().UTC(),
+		Path:      path,
+		Nodes:     nodes,
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Uninstall JSON type
+// ---------------------------------------------------------------------------
+
+type uninstallJSON struct {
+	Version   string       `json:"version"`
+	Timestamp time.Time    `json:"timestamp"`
+	AppName   string       `json:"app_name"`
+	Items     int          `json:"items"`
+	TotalSize int64        `json:"total_size"`
+	Targets   []targetJSON `json:"targets"`
+}
+
+// buildUninstallJSON converts uninstall targets into a JSON-serializable structure.
+func buildUninstallJSON(appName string, targets []scanner.Target) uninstallJSON {
+	var totalSize int64
+	jsonTargets := make([]targetJSON, 0, len(targets))
+	for _, t := range targets {
+		totalSize += t.Size
+		jsonTargets = append(jsonTargets, targetJSON{
+			Path: t.Path,
+			Size: t.Size,
+			Risk: t.Risk.String(),
+		})
+	}
+	return uninstallJSON{
+		Version:   version,
+		Timestamp: time.Now().UTC(),
+		AppName:   appName,
+		Items:     len(targets),
+		TotalSize: totalSize,
+		Targets:   jsonTargets,
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Report JSON type
+// ---------------------------------------------------------------------------
+
+type reportJSON struct {
+	Version       string           `json:"version"`
+	Timestamp     time.Time        `json:"timestamp"`
+	TotalFreed    int64            `json:"total_freed"`
+	TotalCleanups int              `json:"total_cleanups"`
+	ByCategory    map[string]int64 `json:"by_category"`
+	Recent        []history.Entry  `json:"recent"`
+}
+
+// ---------------------------------------------------------------------------
+// Watch JSON type
+// ---------------------------------------------------------------------------
+
+type watchAlertJSON struct {
+	Version   string    `json:"version"`
+	Timestamp time.Time `json:"timestamp"`
+	FreeBytes int64     `json:"free_bytes"`
+	Threshold int64     `json:"threshold"`
+	Alert     bool      `json:"alert"`
+	Message   string    `json:"message"`
+}

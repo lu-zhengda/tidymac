@@ -288,6 +288,13 @@ func TestParseSize(t *testing.T) {
 		{"1024", 1024, false},
 		{"0", 0, false},
 		{"2TB", 2 * 1024 * 1024 * 1024 * 1024, false},
+		// Single-letter suffixes.
+		{"100M", 100 * 1024 * 1024, false},
+		{"100m", 100 * 1024 * 1024, false},
+		{"1G", 1024 * 1024 * 1024, false},
+		{"1g", 1024 * 1024 * 1024, false},
+		{"500K", 500 * 1024, false},
+		{"2T", 2 * 1024 * 1024 * 1024 * 1024, false},
 		{"", 0, true},
 		{"abc", 0, true},
 		{"-1", 0, true},
@@ -465,5 +472,161 @@ func TestParseDuration(t *testing.T) {
 				t.Errorf("ParseDuration(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Validate tests
+// ---------------------------------------------------------------------------
+
+func TestValidate_InvalidExcludePattern(t *testing.T) {
+	cfg := Default()
+	cfg.Exclude = []string{"~/[bad"}
+	// Clear default paths so they don't produce path-not-found warnings.
+	cfg.LargeFiles.Paths = nil
+	cfg.DevTools.SearchPaths = nil
+
+	warnings := cfg.Validate()
+	found := false
+	for _, w := range warnings {
+		if w.Field == "exclude" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected warning for invalid exclude pattern")
+	}
+}
+
+func TestValidate_InvalidScheduleTime(t *testing.T) {
+	cfg := Default()
+	cfg.Schedule.Time = "25:00"
+	cfg.LargeFiles.Paths = nil
+	cfg.DevTools.SearchPaths = nil
+
+	warnings := cfg.Validate()
+	found := false
+	for _, w := range warnings {
+		if w.Field == "schedule.time" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected warning for invalid schedule time")
+	}
+}
+
+func TestValidate_InvalidScheduleCategory(t *testing.T) {
+	cfg := Default()
+	cfg.Schedule.Categories = []string{"bogus"}
+	cfg.LargeFiles.Paths = nil
+	cfg.DevTools.SearchPaths = nil
+
+	warnings := cfg.Validate()
+	found := false
+	for _, w := range warnings {
+		if w.Field == "schedule.categories" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected warning for unknown schedule category")
+	}
+}
+
+func TestValidate_NonExistentPath(t *testing.T) {
+	cfg := Default()
+	cfg.LargeFiles.Paths = []string{"/nonexistent/path/xyz"}
+	cfg.DevTools.SearchPaths = nil
+
+	warnings := cfg.Validate()
+	found := false
+	for _, w := range warnings {
+		if w.Field == "large_files.paths" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected warning for non-existent path")
+	}
+}
+
+func TestValidate_InvalidScheduleInterval(t *testing.T) {
+	cfg := Default()
+	cfg.Schedule.Interval = "monthly"
+	cfg.LargeFiles.Paths = nil
+	cfg.DevTools.SearchPaths = nil
+
+	warnings := cfg.Validate()
+	found := false
+	for _, w := range warnings {
+		if w.Field == "schedule.interval" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected warning for invalid schedule interval")
+	}
+}
+
+func TestValidate_Clean(t *testing.T) {
+	cfg := Default()
+	// Default config uses ~-prefixed paths that may or may not exist,
+	// so clear them for a clean validation.
+	cfg.LargeFiles.Paths = nil
+	cfg.DevTools.SearchPaths = nil
+
+	warnings := cfg.Validate()
+	if len(warnings) != 0 {
+		for _, w := range warnings {
+			t.Errorf("unexpected warning: field=%q message=%q", w.Field, w.Message)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// LoadAndValidate tests
+// ---------------------------------------------------------------------------
+
+func TestLoadAndValidate_UnknownKeys(t *testing.T) {
+	data := []byte(`
+bogus_key: true
+large_files:
+  min_size: "100MB"
+`)
+	_, warnings := LoadAndValidate(data)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "bogus_key" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected warning for unknown top-level key")
+	}
+}
+
+func TestLoadAndValidate_UnknownScanner(t *testing.T) {
+	data := []byte(`
+scanners:
+  system: true
+  made_up_scanner: true
+`)
+	_, warnings := LoadAndValidate(data)
+	found := false
+	for _, w := range warnings {
+		if w.Field == "scanners.made_up_scanner" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected warning for unknown scanner key")
 	}
 }

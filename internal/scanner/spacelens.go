@@ -10,12 +10,12 @@ import (
 )
 
 type SpaceLensNode struct {
-	Path     string
-	Name     string
-	Size     int64
-	IsDir    bool
-	Children []SpaceLensNode
-	Depth    int
+	Path     string          `json:"path"`
+	Name     string          `json:"name"`
+	Size     int64           `json:"size"`
+	IsDir    bool            `json:"is_dir"`
+	Children []SpaceLensNode `json:"children,omitempty"`
+	Depth    int             `json:"depth"`
 }
 
 // ProgressFunc is called with the name of each directory being analyzed.

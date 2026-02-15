@@ -20,16 +20,16 @@ type Entry struct {
 
 // CategoryStats holds aggregate statistics for a single category.
 type CategoryStats struct {
-	BytesFreed int64
-	Cleanups   int
+	BytesFreed int64 `json:"bytes_freed"`
+	Cleanups   int   `json:"cleanups"`
 }
 
 // Stats holds aggregate cleanup statistics.
 type Stats struct {
-	TotalFreed    int64
-	TotalCleanups int
-	ByCategory    map[string]CategoryStats
-	Recent        []Entry
+	TotalFreed    int64                    `json:"total_freed"`
+	TotalCleanups int                      `json:"total_cleanups"`
+	ByCategory    map[string]CategoryStats `json:"by_category"`
+	Recent        []Entry                  `json:"recent"`
 }
 
 // History manages the cleanup history file.

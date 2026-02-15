@@ -16,6 +16,10 @@ var statsCmd = &cobra.Command{
 		h := history.New(history.DefaultPath())
 		stats := h.Stats()
 
+		if jsonFlag {
+			return printJSON(buildStatsJSON(stats))
+		}
+
 		fmt.Println("macbroom -- Cleanup Stats")
 		fmt.Println()
 

@@ -16,9 +16,9 @@ const partialHashSize = 4096
 
 // Group represents a set of duplicate files sharing the same content.
 type Group struct {
-	Size  int64
-	Hash  string
-	Files []string
+	Size  int64    `json:"size"`
+	Hash  string   `json:"hash"`
+	Files []string `json:"files"`
 }
 
 // ProgressFunc is called with each file path as it is visited during scanning.

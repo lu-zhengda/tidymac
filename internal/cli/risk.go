@@ -11,10 +11,10 @@ import (
 
 // RiskBreakdown holds aggregated byte sizes grouped by risk level.
 type RiskBreakdown struct {
-	Safe     int64
-	Moderate int64
-	Risky    int64
-	Total    int64
+	Safe     int64 `json:"safe"`
+	Moderate int64 `json:"moderate"`
+	Risky    int64 `json:"risky"`
+	Total    int64 `json:"total"`
 }
 
 // riskSummary aggregates targets by their risk level.

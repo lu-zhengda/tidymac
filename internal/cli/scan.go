@@ -4,14 +4,28 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/lu-zhengda/macbroom/internal/config"
 	"github.com/lu-zhengda/macbroom/internal/scancache"
+	"github.com/lu-zhengda/macbroom/internal/scanner"
 	"github.com/spf13/cobra"
 )
 
 var (
-	scanFilter  CategoryFilter
-	scanExclude []string
+	scanFilter    CategoryFilter
+	scanExclude   []string
+	scanThreshold string
 )
+
+// filterByThreshold returns only targets above the given size threshold.
+func filterByThreshold(targets []scanner.Target, threshold int64) []scanner.Target {
+	filtered := make([]scanner.Target, 0, len(targets))
+	for _, t := range targets {
+		if t.Size >= threshold {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
+}
 
 var scanCmd = &cobra.Command{
 	Use:   "scan",
@@ -26,10 +40,21 @@ var scanCmd = &cobra.Command{
 		e := buildEngine()
 		cats := selectedCategories(scanFilter)
 
-		fmt.Println("Scanning...")
+		if !jsonFlag {
+			fmt.Println("Scanning...")
+		}
 		targets, err := scanWithCategories(e, cats)
 		if err != nil {
 			return fmt.Errorf("scan failed: %w", err)
+		}
+
+		// Apply --threshold filter if set.
+		if scanThreshold != "" {
+			thresholdBytes, err := config.ParseSize(scanThreshold)
+			if err != nil {
+				return fmt.Errorf("invalid threshold %q: %w", scanThreshold, err)
+			}
+			targets = filterByThreshold(targets, thresholdBytes)
 		}
 
 		prev, prevErr := scancache.Load(scancache.DefaultPath())
@@ -60,14 +85,20 @@ var scanCmd = &cobra.Command{
 			diff = &d
 		}
 
-		printScanResults(targets, diff)
 		_ = scancache.Save(scancache.DefaultPath(), curr)
+
+		if jsonFlag {
+			return printJSON(buildScanJSON(targets, diff))
+		}
+
+		printScanResults(targets, diff)
 		return nil
 	},
 }
 
 func init() {
 	f := scanCmd.Flags()
+	f.StringVar(&scanThreshold, "threshold", "", "Only show items above this size (e.g., 100M, 1G)")
 	f.BoolVar(&scanFilter.System, "system", false, "Scan system junk only")
 	f.BoolVar(&scanFilter.Browser, "browser", false, "Scan browser caches only")
 	f.BoolVar(&scanFilter.Xcode, "xcode", false, "Scan Xcode junk only")

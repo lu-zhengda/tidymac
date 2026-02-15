@@ -24,15 +24,24 @@ var uninstallCmd = &cobra.Command{
 		appName := args[0]
 		s := scanner.NewAppScanner("", "")
 
-		fmt.Printf("Searching for files related to %q...\n", appName)
+		if !jsonFlag {
+			fmt.Printf("Searching for files related to %q...\n", appName)
+		}
 		targets, err := s.FindRelatedFiles(context.Background(), appName)
 		if err != nil {
 			return fmt.Errorf("failed to find app files: %w", err)
 		}
 
 		if len(targets) == 0 {
+			if jsonFlag {
+				return printJSON(buildUninstallJSON(appName, targets))
+			}
 			fmt.Printf("No files found for %q.\n", appName)
 			return nil
+		}
+
+		if jsonFlag {
+			return printJSON(buildUninstallJSON(appName, targets))
 		}
 
 		printScanResults(targets, nil)

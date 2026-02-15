@@ -143,6 +143,70 @@ func TestBuildDupesJSON(t *testing.T) {
 	}
 }
 
+func TestBuildSpaceLensJSON(t *testing.T) {
+	nodes := []scanner.SpaceLensNode{
+		{Path: "/tmp/a", Name: "a", Size: 5000, IsDir: true, Depth: 0},
+		{Path: "/tmp/b", Name: "b", Size: 2000, IsDir: false, Depth: 0},
+	}
+
+	result := buildSpaceLensJSON("/tmp", nodes)
+
+	if result.Version != version {
+		t.Errorf("Version = %q, want %q", result.Version, version)
+	}
+	if result.Path != "/tmp" {
+		t.Errorf("Path = %q, want %q", result.Path, "/tmp")
+	}
+	if len(result.Nodes) != 2 {
+		t.Errorf("len(Nodes) = %d, want 2", len(result.Nodes))
+	}
+	if result.Timestamp.IsZero() {
+		t.Error("Timestamp should not be zero")
+	}
+}
+
+func TestBuildUninstallJSON(t *testing.T) {
+	targets := []scanner.Target{
+		{Path: "/app/a", Size: 1000, Risk: scanner.Safe},
+		{Path: "/app/b", Size: 2000, Risk: scanner.Moderate},
+	}
+
+	result := buildUninstallJSON("TestApp", targets)
+
+	if result.Version != version {
+		t.Errorf("Version = %q, want %q", result.Version, version)
+	}
+	if result.AppName != "TestApp" {
+		t.Errorf("AppName = %q, want %q", result.AppName, "TestApp")
+	}
+	if result.TotalSize != 3000 {
+		t.Errorf("TotalSize = %d, want 3000", result.TotalSize)
+	}
+	if result.Items != 2 {
+		t.Errorf("Items = %d, want 2", result.Items)
+	}
+	if len(result.Targets) != 2 {
+		t.Errorf("len(Targets) = %d, want 2", len(result.Targets))
+	}
+	if result.Timestamp.IsZero() {
+		t.Error("Timestamp should not be zero")
+	}
+}
+
+func TestBuildUninstallJSON_Empty(t *testing.T) {
+	result := buildUninstallJSON("NoApp", nil)
+
+	if result.AppName != "NoApp" {
+		t.Errorf("AppName = %q, want %q", result.AppName, "NoApp")
+	}
+	if result.TotalSize != 0 {
+		t.Errorf("TotalSize = %d, want 0", result.TotalSize)
+	}
+	if result.Items != 0 {
+		t.Errorf("Items = %d, want 0", result.Items)
+	}
+}
+
 func TestBuildStatsJSON(t *testing.T) {
 	stats := history.Stats{
 		TotalFreed:    1048576,
