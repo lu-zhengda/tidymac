@@ -1369,6 +1369,33 @@ func (m Model) viewDashboard() string {
 	}
 
 	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Total reclaimable: %s ", utils.FormatSize(m.animatedSize(totalSize))))
+
+	// Risk breakdown summary.
+	var safeSz, modSz, riskySz int64
+	for _, r := range m.results {
+		for _, t := range r.Targets {
+			switch t.Risk {
+			case scanner.Safe:
+				safeSz += t.Size
+			case scanner.Moderate:
+				modSz += t.Size
+			case scanner.Risky:
+				riskySz += t.Size
+			}
+		}
+	}
+	if totalSize > 0 {
+		pct := func(n int64) int { return int(float64(n) / float64(totalSize) * 100) }
+		riskLine := fmt.Sprintf("Safe: %s (%d%%)", utils.FormatSize(safeSz), pct(safeSz))
+		if modSz > 0 {
+			riskLine += fmt.Sprintf("  Moderate: %s (%d%%)", utils.FormatSize(modSz), pct(modSz))
+		}
+		if riskySz > 0 {
+			riskLine += fmt.Sprintf("  Risky: %s (%d%%)", utils.FormatSize(riskySz), pct(riskySz))
+		}
+		s += "\n" + dimStyle.Render(riskLine)
+	}
+
 	s += renderFooter("j/k navigate | enter view details | esc back | q quit")
 	return s
 }

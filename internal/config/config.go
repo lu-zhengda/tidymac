@@ -194,10 +194,14 @@ var sizeSuffixes = []sizeSuffix{
 	{"GB", 1024 * 1024 * 1024},
 	{"MB", 1024 * 1024},
 	{"KB", 1024},
+	{"T", 1024 * 1024 * 1024 * 1024},
+	{"G", 1024 * 1024 * 1024},
+	{"M", 1024 * 1024},
+	{"K", 1024},
 }
 
 // ParseSize parses a human-readable size string like "100MB", "1GB",
-// "500KB", "2TB", or a plain number (bytes) into int64 bytes.
+// "500KB", "2TB", "100M", "1G", or a plain number (bytes) into int64 bytes.
 func ParseSize(s string) (int64, error) {
 	if s == "" {
 		return 0, fmt.Errorf("empty size string")
@@ -267,6 +271,212 @@ func (c *Config) IsExcluded(path string) bool {
 		}
 	}
 	return false
+}
+
+// Warning represents a non-fatal configuration issue.
+type Warning struct {
+	Field      string
+	Message    string
+	Suggestion string
+}
+
+// validScheduleCategories lists category names accepted in schedule.categories.
+var validScheduleCategories = map[string]bool{
+	"system": true, "browser": true, "xcode": true, "large": true,
+	"docker": true, "node": true, "homebrew": true, "simulator": true,
+	"python": true, "rust": true, "go": true, "jetbrains": true,
+	"maven": true, "gradle": true, "ruby": true,
+	"dev": true, "caches": true, "all": true,
+}
+
+// knownTopLevelKeys lists the accepted top-level YAML keys.
+var knownTopLevelKeys = map[string]bool{
+	"large_files": true, "dev_tools": true, "exclude": true,
+	"scanners": true, "spacelens": true, "schedule": true,
+}
+
+// knownScannerKeys lists the accepted keys under the "scanners" map.
+var knownScannerKeys = map[string]bool{
+	"system": true, "browser": true, "xcode": true, "large_files": true,
+	"docker": true, "node": true, "homebrew": true, "ios_simulators": true,
+	"python": true, "rust": true, "go": true, "jetbrains": true,
+	"maven": true, "gradle": true, "ruby": true,
+}
+
+// Validate checks the config for common issues and returns warnings.
+func (c *Config) Validate() []Warning {
+	var warnings []Warning
+
+	// Validate exclude patterns.
+	for _, pattern := range c.Exclude {
+		// Skip "/**" suffix patterns — they use prefix matching, not filepath.Match.
+		if strings.HasSuffix(pattern, "/**") {
+			continue
+		}
+		// Expand ~ for validation.
+		p := pattern
+		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(p, "~/") {
+			p = home + p[1:]
+		}
+		if _, err := filepath.Match(p, "test"); err != nil {
+			warnings = append(warnings, Warning{
+				Field:      "exclude",
+				Message:    fmt.Sprintf("invalid exclude pattern %q: %v", pattern, err),
+				Suggestion: "Check glob syntax; avoid unmatched brackets",
+			})
+		}
+	}
+
+	// Validate large_files.paths — check for non-existent paths.
+	for _, p := range c.LargeFiles.Paths {
+		expanded := p
+		if home, err := os.UserHomeDir(); err == nil {
+			if strings.HasPrefix(expanded, "~/") {
+				expanded = filepath.Join(home, expanded[2:])
+			} else if expanded == "~" {
+				expanded = home
+			}
+		}
+		if _, err := os.Stat(expanded); err != nil {
+			warnings = append(warnings, Warning{
+				Field:      "large_files.paths",
+				Message:    fmt.Sprintf("path %q does not exist", p),
+				Suggestion: "Remove or correct the path",
+			})
+		}
+	}
+
+	// Validate dev_tools.search_paths — check for non-existent paths.
+	for _, p := range c.DevTools.SearchPaths {
+		expanded := p
+		if home, err := os.UserHomeDir(); err == nil {
+			if strings.HasPrefix(expanded, "~/") {
+				expanded = filepath.Join(home, expanded[2:])
+			} else if expanded == "~" {
+				expanded = home
+			}
+		}
+		if _, err := os.Stat(expanded); err != nil {
+			warnings = append(warnings, Warning{
+				Field:      "dev_tools.search_paths",
+				Message:    fmt.Sprintf("path %q does not exist", p),
+				Suggestion: "Remove or correct the path",
+			})
+		}
+	}
+
+	// Validate schedule.time.
+	if c.Schedule.Time != "" {
+		parts := strings.SplitN(c.Schedule.Time, ":", 2)
+		valid := true
+		if len(parts) != 2 {
+			valid = false
+		} else {
+			hour, err := strconv.Atoi(parts[0])
+			if err != nil || hour < 0 || hour > 23 {
+				valid = false
+			}
+			minute, err := strconv.Atoi(parts[1])
+			if err != nil || minute < 0 || minute > 59 {
+				valid = false
+			}
+		}
+		if !valid {
+			warnings = append(warnings, Warning{
+				Field:      "schedule.time",
+				Message:    fmt.Sprintf("invalid schedule time %q: expected HH:MM (0-23:0-59)", c.Schedule.Time),
+				Suggestion: "Use format HH:MM, e.g. \"10:00\" or \"14:30\"",
+			})
+		}
+	}
+
+	// Validate schedule.interval.
+	if c.Schedule.Interval != "" {
+		lower := strings.ToLower(c.Schedule.Interval)
+		if lower != "daily" && lower != "weekly" {
+			warnings = append(warnings, Warning{
+				Field:      "schedule.interval",
+				Message:    fmt.Sprintf("invalid schedule interval %q", c.Schedule.Interval),
+				Suggestion: "Use \"daily\" or \"weekly\"",
+			})
+		}
+	}
+
+	// Validate schedule.categories.
+	for _, cat := range c.Schedule.Categories {
+		if !validScheduleCategories[cat] {
+			warnings = append(warnings, Warning{
+				Field:      "schedule.categories",
+				Message:    fmt.Sprintf("unknown schedule category %q", cat),
+				Suggestion: "Valid categories: system, browser, xcode, large, docker, node, homebrew, simulator, python, rust, go, jetbrains, maven, gradle, ruby, dev, caches, all",
+			})
+		}
+	}
+
+	return warnings
+}
+
+// LoadAndValidate unmarshals YAML data into a Config, detects unknown keys,
+// and runs structural validation. It returns the config and any warnings.
+func LoadAndValidate(data []byte) (*Config, []Warning) {
+	cfg := Default()
+	var warnings []Warning
+
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		warnings = append(warnings, Warning{
+			Field:   "",
+			Message: fmt.Sprintf("failed to parse config: %v", err),
+		})
+		return cfg, warnings
+	}
+
+	// Resolve MinSize from the string representation.
+	if cfg.LargeFiles.MinSizeStr != "" {
+		size, err := ParseSize(cfg.LargeFiles.MinSizeStr)
+		if err != nil {
+			warnings = append(warnings, Warning{
+				Field:      "large_files.min_size",
+				Message:    fmt.Sprintf("invalid min_size %q: %v", cfg.LargeFiles.MinSizeStr, err),
+				Suggestion: "Use a size string like \"100MB\" or \"1GB\"",
+			})
+		} else {
+			cfg.LargeFiles.MinSize = size
+		}
+	}
+
+	// Detect unknown top-level keys.
+	var raw map[string]interface{}
+	if err := yaml.Unmarshal(data, &raw); err == nil {
+		for key := range raw {
+			if !knownTopLevelKeys[key] {
+				warnings = append(warnings, Warning{
+					Field:      key,
+					Message:    fmt.Sprintf("unknown config key %q", key),
+					Suggestion: "Check spelling; valid keys: large_files, dev_tools, exclude, scanners, spacelens, schedule",
+				})
+			}
+		}
+
+		// Detect unknown scanner keys.
+		if scannersRaw, ok := raw["scanners"]; ok {
+			if scannersMap, ok := scannersRaw.(map[string]interface{}); ok {
+				for key := range scannersMap {
+					if !knownScannerKeys[key] {
+						warnings = append(warnings, Warning{
+							Field:      "scanners." + key,
+							Message:    fmt.Sprintf("unknown scanner %q", key),
+							Suggestion: "Valid scanners: system, browser, xcode, large_files, docker, node, homebrew, ios_simulators, python, rust, go, jetbrains, maven, gradle, ruby",
+						})
+					}
+				}
+			}
+		}
+	}
+
+	// Run structural validation.
+	warnings = append(warnings, cfg.Validate()...)
+
+	return cfg, warnings
 }
 
 // ParseDuration parses duration strings like "90d", "30d", "7d" into

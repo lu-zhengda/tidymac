@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/lu-zhengda/macbroom/internal/history"
+	"github.com/lu-zhengda/macbroom/internal/scancache"
 	"github.com/lu-zhengda/macbroom/internal/schedule"
 	"github.com/lu-zhengda/macbroom/internal/trash"
 	"github.com/lu-zhengda/macbroom/internal/utils"
@@ -20,16 +21,16 @@ var (
 	cleanExclude   []string
 )
 
-// cleanPrint prints to stdout only when --quiet is not set.
+// cleanPrint prints to stdout only when --quiet and --json are not set.
 func cleanPrint(format string, a ...any) {
-	if !cleanQuiet {
+	if !cleanQuiet && !jsonFlag {
 		fmt.Printf(format, a...)
 	}
 }
 
-// cleanPrintln prints a line to stdout only when --quiet is not set.
+// cleanPrintln prints a line to stdout only when --quiet and --json are not set.
 func cleanPrintln(a ...any) {
-	if !cleanQuiet {
+	if !cleanQuiet && !jsonFlag {
 		fmt.Println(a...)
 	}
 }
@@ -54,13 +55,47 @@ var cleanCmd = &cobra.Command{
 		}
 
 		if len(targets) == 0 {
+			if jsonFlag {
+				return printJSON(cleanJSON{
+					scanJSON: buildScanJSON(targets, nil),
+				})
+			}
 			cleanPrintln("Nothing to clean!")
 			return nil
 		}
 
-		if !cleanQuiet {
-			printScanResults(targets)
+		prev, prevErr := scancache.Load(scancache.DefaultPath())
+
+		grouped := make(map[string]*scancache.CategorySnapshot)
+		for _, t := range targets {
+			cs := grouped[t.Category]
+			if cs == nil {
+				cs = &scancache.CategorySnapshot{Name: t.Category}
+				grouped[t.Category] = cs
+			}
+			cs.Size += t.Size
+			cs.Items++
 		}
+		var snapCats []scancache.CategorySnapshot
+		for _, cs := range grouped {
+			snapCats = append(snapCats, *cs)
+		}
+		var snapTotal int64
+		for _, t := range targets {
+			snapTotal += t.Size
+		}
+		curr := scancache.Snapshot{Timestamp: time.Now().UTC(), Categories: snapCats, TotalSize: snapTotal}
+
+		var diff *scancache.DiffResult
+		if prevErr == nil {
+			d := scancache.Diff(prev, curr)
+			diff = &d
+		}
+
+		if !cleanQuiet && !jsonFlag {
+			printScanResults(targets, diff)
+		}
+		_ = scancache.Save(scancache.DefaultPath(), curr)
 
 		var totalSize int64
 		for _, t := range targets {
@@ -77,11 +112,12 @@ var cleanCmd = &cobra.Command{
 			return nil
 		}
 
-		if !cleanQuiet {
+		if !cleanQuiet && !jsonFlag {
 			printYoloWarning()
 		}
 
-		if !shouldSkipConfirm(cleanYes) {
+		// --json auto-confirms (no terminal interaction in JSON mode).
+		if !jsonFlag && !shouldSkipConfirm(cleanYes) {
 			if cleanPermanent {
 				if !confirmDangerous(fmt.Sprintf("Permanently delete %d items (%s)?", len(targets), utils.FormatSize(totalSize))) {
 					cleanPrintln("Cancelled.")
@@ -102,6 +138,7 @@ var cleanCmd = &cobra.Command{
 		byCategory := make(map[string]*catResult)
 
 		var cleaned, failed int
+		var deletedSize int64
 		for _, t := range targets {
 			var err error
 			if cleanPermanent {
@@ -114,6 +151,7 @@ var cleanCmd = &cobra.Command{
 				failed++
 			} else {
 				cleaned++
+				deletedSize += t.Size
 				cr := byCategory[t.Category]
 				if cr == nil {
 					cr = &catResult{}
@@ -123,12 +161,6 @@ var cleanCmd = &cobra.Command{
 				cr.bytes += t.Size
 			}
 		}
-
-		cleanPrint("\nCleaned %d items (%s freed)", cleaned, utils.FormatSize(totalSize))
-		if failed > 0 {
-			cleanPrint(", %d failed", failed)
-		}
-		cleanPrintln()
 
 		// Record cleanup history per category.
 		method := "trash"
@@ -146,6 +178,22 @@ var cleanCmd = &cobra.Command{
 				Method:     method,
 			})
 		}
+
+		if jsonFlag {
+			result := cleanJSON{
+				scanJSON:     buildScanJSON(targets, diff),
+				DeletedSize:  deletedSize,
+				DeletedItems: cleaned,
+				Errors:       failed,
+			}
+			return printJSON(result)
+		}
+
+		cleanPrint("\nCleaned %d items (%s freed)", cleaned, utils.FormatSize(totalSize))
+		if failed > 0 {
+			cleanPrint(", %d failed", failed)
+		}
+		cleanPrintln()
 
 		// Send macOS notification when running in quiet mode with notify enabled.
 		if cleanQuiet && appConfig != nil && appConfig.Schedule.Notify && cleaned > 0 {

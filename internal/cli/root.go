@@ -18,6 +18,7 @@ import (
 
 var (
 	yoloMode   bool
+	jsonFlag   bool
 	configPath string
 	appConfig  *config.Config
 
@@ -41,6 +42,10 @@ var rootCmd = &cobra.Command{
 			return fmt.Errorf("failed to load config: %w", err)
 		}
 		appConfig = cfg
+
+		for _, w := range appConfig.Validate() {
+			fmt.Fprintf(os.Stderr, "warning: %s\n", w.Message)
+		}
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -71,6 +76,7 @@ func init() {
 	rootCmd.SetVersionTemplate(fmt.Sprintf("macbroom %s\n", version))
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
 	rootCmd.PersistentFlags().BoolVar(&yoloMode, "yolo", false, "Skip ALL confirmation prompts (dangerous!)")
+	rootCmd.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Output in JSON format")
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "Path to config file (default ~/.config/macbroom/config.yaml)")
 	rootCmd.Flags().String("generate-completion", "", "Generate shell completion (bash, zsh, fish)")
 	rootCmd.Flags().MarkHidden("generate-completion")
@@ -82,6 +88,9 @@ func init() {
 	rootCmd.AddCommand(statsCmd)
 	rootCmd.AddCommand(dupesCmd)
 	rootCmd.AddCommand(scheduleCmd)
+	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(reportCmd)
+	rootCmd.AddCommand(watchCmd)
 }
 
 // shouldSkipConfirm returns true if the user wants to skip confirmation,

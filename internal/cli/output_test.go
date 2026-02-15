@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lu-zhengda/macbroom/internal/scancache"
 	"github.com/lu-zhengda/macbroom/internal/scanner"
 )
 
@@ -88,7 +89,7 @@ func TestTruncatePath(t *testing.T) {
 
 func TestPrintScanResults_Empty(t *testing.T) {
 	out := captureOutput(func() {
-		printScanResults(nil)
+		printScanResults(nil, nil)
 	})
 	if !strings.Contains(out, "No junk files found") {
 		t.Errorf("expected 'No junk files found', got %q", out)
@@ -109,7 +110,7 @@ func TestPrintScanResults_GroupedAndSorted(t *testing.T) {
 	}
 
 	out := captureOutput(func() {
-		printScanResults(targets)
+		printScanResults(targets, nil)
 	})
 
 	// Category with larger total (Big Cat = 6000) should appear before Small Cat (600).
@@ -151,5 +152,80 @@ func TestPrintScanResults_GroupedAndSorted(t *testing.T) {
 	// Total reclaimable line should be present.
 	if !strings.Contains(out, "Total reclaimable") {
 		t.Error("expected 'Total reclaimable' in output")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// diffIndicator
+// ---------------------------------------------------------------------------
+
+func TestDiffIndicator_Grew(t *testing.T) {
+	diff := &scancache.DiffResult{
+		Categories: map[string]scancache.CategoryDiff{
+			"System Junk": {PreviousSize: 1000, CurrentSize: 2000, Delta: 1000},
+		},
+	}
+	got := diffIndicator("System Junk", diff)
+	stripped := stripAnsi(got)
+	if !strings.Contains(stripped, "+") {
+		t.Errorf("expected '+' in grew indicator, got %q", stripped)
+	}
+}
+
+func TestDiffIndicator_Shrank(t *testing.T) {
+	diff := &scancache.DiffResult{
+		Categories: map[string]scancache.CategoryDiff{
+			"System Junk": {PreviousSize: 2000, CurrentSize: 1000, Delta: -1000},
+		},
+	}
+	got := diffIndicator("System Junk", diff)
+	stripped := stripAnsi(got)
+	if !strings.Contains(stripped, "-") {
+		t.Errorf("expected '-' in shrank indicator, got %q", stripped)
+	}
+}
+
+func TestDiffIndicator_New(t *testing.T) {
+	diff := &scancache.DiffResult{
+		Categories: map[string]scancache.CategoryDiff{
+			"System Junk": {CurrentSize: 1000, Delta: 1000, IsNew: true},
+		},
+	}
+	got := diffIndicator("System Junk", diff)
+	stripped := stripAnsi(got)
+	if !strings.Contains(stripped, "new") {
+		t.Errorf("expected 'new' in indicator, got %q", stripped)
+	}
+}
+
+func TestDiffIndicator_Unchanged(t *testing.T) {
+	diff := &scancache.DiffResult{
+		Categories: map[string]scancache.CategoryDiff{
+			"System Junk": {PreviousSize: 1000, CurrentSize: 1000, Delta: 0},
+		},
+	}
+	got := diffIndicator("System Junk", diff)
+	stripped := stripAnsi(got)
+	if !strings.Contains(stripped, "unchanged") {
+		t.Errorf("expected 'unchanged' in indicator, got %q", stripped)
+	}
+}
+
+func TestDiffIndicator_Nil(t *testing.T) {
+	got := diffIndicator("System Junk", nil)
+	if got != "" {
+		t.Errorf("expected empty string for nil diff, got %q", got)
+	}
+}
+
+func TestDiffIndicator_NotFound(t *testing.T) {
+	diff := &scancache.DiffResult{
+		Categories: map[string]scancache.CategoryDiff{
+			"Other": {PreviousSize: 1000, CurrentSize: 1000, Delta: 0},
+		},
+	}
+	got := diffIndicator("System Junk", diff)
+	if got != "" {
+		t.Errorf("expected empty string for category not in diff, got %q", got)
 	}
 }

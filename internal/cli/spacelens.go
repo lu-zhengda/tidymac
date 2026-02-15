@@ -33,11 +33,17 @@ var spacelensCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("Analyzing %s...\n\n", path)
+		if !jsonFlag {
+			fmt.Printf("Analyzing %s...\n\n", path)
+		}
 		sl := scanner.NewSpaceLens(path, spacelensDepth)
 		nodes, err := sl.Analyze(context.Background())
 		if err != nil {
 			return fmt.Errorf("failed to analyze: %w", err)
+		}
+
+		if jsonFlag {
+			return printJSON(buildSpaceLensJSON(path, nodes))
 		}
 
 		printSpaceLensNodes(nodes, 0)

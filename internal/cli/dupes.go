@@ -36,21 +36,29 @@ var dupesCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Printf("Scanning for duplicates in: %s\n", strings.Join(dirs, ", "))
+		if !jsonFlag {
+			fmt.Printf("Scanning for duplicates in: %s\n", strings.Join(dirs, ", "))
+		}
 
 		var fileCount int
-		groups, err := dupes.FindWithProgress(context.Background(), dirs, dupesMinSize, func(path string) {
+		progressFn := func(path string) {
 			fileCount++
-			if fileCount%500 == 0 {
+			if !jsonFlag && fileCount%500 == 0 {
 				fmt.Printf("\r  Scanned %d files...", fileCount)
 			}
-		})
+		}
+		groups, err := dupes.FindWithProgress(context.Background(), dirs, dupesMinSize, progressFn)
 		if err != nil {
 			return fmt.Errorf("failed to scan for duplicates: %w", err)
 		}
 
-		if fileCount >= 500 {
+		if !jsonFlag && fileCount >= 500 {
 			fmt.Println() // newline after progress
+		}
+
+		// --json mode: output JSON and return (acts like --dry-run).
+		if jsonFlag {
+			return printJSON(buildDupesJSON(groups))
 		}
 
 		if len(groups) == 0 {

@@ -27,13 +27,13 @@ func (r RiskLevel) String() string {
 }
 
 type Target struct {
-	Path        string
-	Size        int64
-	Category    string
-	Description string
-	Risk        RiskLevel
-	ModTime     time.Time
-	IsDir       bool
+	Path        string    `json:"path"`
+	Size        int64     `json:"size"`
+	Category    string    `json:"category"`
+	Description string    `json:"description"`
+	Risk        RiskLevel `json:"risk"`
+	ModTime     time.Time `json:"mod_time"`
+	IsDir       bool      `json:"is_dir"`
 }
 
 type Scanner interface {
