@@ -4,8 +4,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/spf13/cobra/doc"
 	"github.com/lu-zhengda/macbroom/internal/cli"
+	"github.com/spf13/cobra/doc"
 )
 
 func main() {

@@ -22,8 +22,8 @@ type SpaceLensNode struct {
 type ProgressFunc func(name string)
 
 type SpaceLens struct {
-	root     string
-	maxDepth int
+	root       string
+	maxDepth   int
 	onProgress ProgressFunc
 }
 

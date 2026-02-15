@@ -22,6 +22,7 @@ type viewState int
 
 const (
 	viewMenu viewState = iota
+	viewScanning
 	viewDashboard
 	viewCategory
 	viewConfirm
@@ -40,6 +41,17 @@ const (
 
 type scanDoneMsg struct {
 	results []engine.ScanResult
+}
+
+type scanProgressMsg struct {
+	progress engine.ScanProgress
+}
+
+type scannerStatus struct {
+	name   string
+	status engine.ScanStatus
+	count  int
+	size   int64
 }
 
 type cleanDoneMsg struct {
@@ -75,6 +87,24 @@ type dupesCleanDoneMsg struct {
 	freed   int64
 }
 
+type cleanProgressMsg struct {
+	done  int
+	total int
+}
+
+type animTickMsg struct{}
+
+func animTick() tea.Cmd {
+	return tea.Tick(30*time.Millisecond, func(t time.Time) tea.Msg {
+		return animTickMsg{}
+	})
+}
+
+type dupesCleanProgressMsg struct {
+	done  int
+	total int
+}
+
 type uninstallScanDoneMsg struct {
 	targets []scanner.Target
 }
@@ -107,6 +137,10 @@ type Model struct {
 	cursor      int
 	selected    map[int]bool
 
+	// Scanning progress state
+	scanStatuses   []scannerStatus
+	scanProgressCh chan engine.ScanProgress
+
 	categoryIdx    int
 	categoryCursor int
 	scrollOffset   int
@@ -134,6 +168,7 @@ type Model struct {
 	dupGroups       []dupes.Group
 	dupLoading      bool
 	dupScanning     string // current file being scanned
+	dupDone         int    // files scanned so far
 	dupCancel       context.CancelFunc
 	dupProgressCh   chan string
 	dupCursor       int
@@ -143,19 +178,34 @@ type Model struct {
 	dupFailed       int
 	dupFreed        int64
 
+	// Cleaning progress state
+	cleaning      bool
+	cleanDone     int
+	cleanTotal    int
+	cleanDoneCh   chan cleanProgressMsg
+	dupCleaning   bool
+	dupCleanDone  int
+	dupCleanTotal int
+	dupCleanCh    chan dupesCleanProgressMsg
+
 	// Uninstall state
-	uiApps           []string       // installed app names
-	uiAppSelected   map[int]bool   // multi-select for apps
-	uiAppCursor     int
+	uiApps            []string     // installed app names
+	uiAppSelected     map[int]bool // multi-select for apps
+	uiAppCursor       int
 	uiAppScrollOffset int
-	uiTargets        []scanner.Target
-	uiLoading        bool
-	uiCursor         int
-	uiScrollOffset2  int            // scroll offset for results view
-	uiSelected       map[int]bool   // selected files to delete
-	uiDeleted        int
-	uiFailed         int
-	uiFreed          int64
+	uiTargets         []scanner.Target
+	uiLoading         bool
+	uiCursor          int
+	uiScrollOffset2   int          // scroll offset for results view
+	uiSelected        map[int]bool // selected files to delete
+	uiDeleted         int
+	uiFailed          int
+	uiFreed           int64
+
+	// Animation state
+	animStart    time.Time
+	animDuration time.Duration
+	animating    bool
 
 	spinner spinner.Model
 
@@ -166,15 +216,16 @@ type Model struct {
 func New(e *engine.Engine) Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("170"))
+	sp.Style = lipgloss.NewStyle().Foreground(colorPrimary)
 
 	return Model{
-		engine:         e,
-		selected:       make(map[int]bool),
-		spinner:        sp,
-		slPath:         "/",
-		uiAppSelected:  make(map[int]bool),
-		uiSelected:     make(map[int]bool),
+		engine:        e,
+		selected:      make(map[int]bool),
+		spinner:       sp,
+		slPath:        "/",
+		uiAppSelected: make(map[int]bool),
+		uiSelected:    make(map[int]bool),
+		dupSelected:   make(map[string]bool),
 	}
 }
 
@@ -182,10 +233,48 @@ func (m Model) Init() tea.Cmd {
 	return m.spinner.Tick
 }
 
-func (m Model) doScan() tea.Cmd {
+func (m Model) animatedSize(target int64) int64 {
+	if !m.animating {
+		return target
+	}
+	elapsed := time.Since(m.animStart)
+	if elapsed >= m.animDuration {
+		return target
+	}
+	ratio := float64(elapsed) / float64(m.animDuration)
+	return int64(ratio * float64(target))
+}
+
+func (m *Model) startScan() tea.Cmd {
+	ch := make(chan engine.ScanProgress, 20)
+	m.scanProgressCh = ch
+
+	return tea.Batch(
+		m.doScan(ch),
+		waitForScanProgress(ch),
+	)
+}
+
+func (m Model) doScan(ch chan engine.ScanProgress) tea.Cmd {
 	return func() tea.Msg {
-		results := m.engine.ScanGrouped(context.Background())
+		results := m.engine.ScanGroupedWithProgress(context.Background(), 4, func(p engine.ScanProgress) {
+			select {
+			case ch <- p:
+			default:
+			}
+		})
+		close(ch)
 		return scanDoneMsg{results: results}
+	}
+}
+
+func waitForScanProgress(ch chan engine.ScanProgress) tea.Cmd {
+	return func() tea.Msg {
+		p, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return scanProgressMsg{progress: p}
 	}
 }
 
@@ -234,24 +323,58 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.scanning || m.slLoading || m.dupLoading || m.uiLoading || m.currentView == viewMaintain {
+		if m.scanning || m.currentView == viewScanning || m.slLoading || m.dupLoading || m.uiLoading || m.currentView == viewMaintain || m.cleaning || m.dupCleaning {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
 		}
 		return m, nil
 
+	case scanProgressMsg:
+		for i, ss := range m.scanStatuses {
+			if ss.name == msg.progress.Name {
+				m.scanStatuses[i].status = msg.progress.Status
+				if msg.progress.Status == engine.ScanDone {
+					m.scanStatuses[i].count = len(msg.progress.Targets)
+					var size int64
+					for _, t := range msg.progress.Targets {
+						size += t.Size
+					}
+					m.scanStatuses[i].size = size
+				}
+				break
+			}
+		}
+		return m, waitForScanProgress(m.scanProgressCh)
+
 	case scanDoneMsg:
 		m.scanning = false
+		m.scanProgressCh = nil
 		m.results = msg.results
 		m.currentView = viewDashboard
+		m.animStart = time.Now()
+		m.animDuration = 500 * time.Millisecond
+		m.animating = true
+		return m, animTick()
+
+	case cleanProgressMsg:
+		m.cleanDone = msg.done
+		m.cleanTotal = msg.total
+		if m.cleanDoneCh != nil {
+			return m, listenCleanProgress(m.cleanDoneCh)
+		}
 		return m, nil
 
 	case cleanDoneMsg:
+		m.cleaning = false
+		m.cleanDoneCh = nil
 		m.lastCleaned = msg.cleaned
 		m.lastFailed = msg.failed
 		m.lastSize = msg.size
 		m.currentView = viewResult
+		m.animStart = time.Now()
+		m.animDuration = 500 * time.Millisecond
+		m.animating = true
 
 		// Record cleanup history.
 		if msg.cleaned > 0 && m.categoryIdx < len(m.results) {
@@ -265,7 +388,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 		}
 
-		return m, nil
+		return m, animTick()
 
 	case spaceLensProgressMsg:
 		m.slScanning = msg.name
@@ -290,6 +413,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case dupesProgressMsg:
+		m.dupDone++
 		m.dupScanning = msg.path
 		if m.dupProgressCh != nil {
 			return m, listenDupesProgress(m.dupProgressCh)
@@ -313,7 +437,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case dupesCleanProgressMsg:
+		m.dupCleanDone = msg.done
+		m.dupCleanTotal = msg.total
+		if m.dupCleanCh != nil {
+			return m, listenDupesCleanProgress(m.dupCleanCh)
+		}
+		return m, nil
+
 	case dupesCleanDoneMsg:
+		m.dupCleaning = false
+		m.dupCleanCh = nil
 		m.dupDeleted = msg.deleted
 		m.dupFailed = msg.failed
 		m.dupFreed = msg.freed
@@ -343,6 +477,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentView = viewResult
 		return m, nil
 
+	case animTickMsg:
+		if m.animating {
+			if time.Since(m.animStart) >= m.animDuration {
+				m.animating = false
+				return m, nil
+			}
+			return m, animTick()
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		// Global quit.
 		if msg.String() == "ctrl+c" || msg.String() == "q" {
@@ -352,6 +496,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.currentView {
 		case viewMenu:
 			return m.updateMenu(msg)
+		case viewScanning:
+			return m.updateScanning(msg)
 		case viewDashboard:
 			return m.updateDashboard(msg)
 		case viewCategory:
@@ -399,9 +545,15 @@ func (m Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		switch m.cursor {
 		case 0: // Clean
-			m.scanning = true
-			m.currentView = viewDashboard
-			return m, tea.Batch(m.doScan(), m.spinner.Tick)
+			m.scanStatuses = nil
+			for _, s := range m.engine.Scanners() {
+				m.scanStatuses = append(m.scanStatuses, scannerStatus{
+					name:   s.Name(),
+					status: engine.ScanWaiting,
+				})
+			}
+			m.currentView = viewScanning
+			return m, tea.Batch(m.spinner.Tick, m.startScan())
 		case 1: // Space Lens
 			m.slLoading = true
 			m.slCursor = 0
@@ -417,6 +569,7 @@ func (m Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.doMaintain(), m.spinner.Tick)
 		case 3: // Duplicates
 			m.dupLoading = true
+			m.dupDone = 0
 			m.dupCursor = 0
 			m.dupScrollOffset = 0
 			m.currentView = viewDupes
@@ -541,10 +694,16 @@ func (m Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "r":
-		m.scanning = true
-		m.currentView = viewDashboard
+		m.scanStatuses = nil
+		for _, s := range m.engine.Scanners() {
+			m.scanStatuses = append(m.scanStatuses, scannerStatus{
+				name:   s.Name(),
+				status: engine.ScanWaiting,
+			})
+		}
 		m.cursor = 0
-		return m, tea.Batch(m.doScan(), m.spinner.Tick)
+		m.currentView = viewScanning
+		return m, tea.Batch(m.spinner.Tick, m.startScan())
 	case "esc", "backspace":
 		m.currentView = viewMenu
 		m.cursor = 0
@@ -571,15 +730,12 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if m.slCursor > 0 {
 			m.slCursor--
-			m.slEnsureCursorVisible()
 		}
 	case "down", "j":
-		max := len(m.slNodes) - 1
-		if m.slCursor < max {
+		if m.slCursor < len(m.slNodes)-1 {
 			m.slCursor++
-			m.slEnsureCursorVisible()
 		}
-	case "enter":
+	case "enter", "right", "l":
 		if m.slCursor < len(m.slNodes) && m.slNodes[m.slCursor].IsDir {
 			m.slPath = m.slNodes[m.slCursor].Path
 			m.slLoading = true
@@ -596,7 +752,7 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.slDeleteTarget = &node
 			m.currentView = viewSpaceLensConfirm
 		}
-	case "h":
+	case "left", "h":
 		// Go up one directory
 		if idx := lastSlash(m.slPath); idx > 0 {
 			m.slPath = m.slPath[:idx]
@@ -613,16 +769,6 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = 1
 	}
 	return m, nil
-}
-
-func (m *Model) slEnsureCursorVisible() {
-	visible := m.visibleItemCount()
-	if m.slCursor < m.slScrollOffset {
-		m.slScrollOffset = m.slCursor
-	}
-	if m.slCursor >= m.slScrollOffset+visible {
-		m.slScrollOffset = m.slCursor - visible + 1
-	}
 }
 
 func (m Model) updateSpaceLensConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -815,6 +961,7 @@ func (m Model) updateDupesResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		// Re-scan.
 		m.dupLoading = true
+		m.dupDone = 0
 		m.dupCursor = 0
 		m.dupScrollOffset = 0
 		m.currentView = viewDupes
@@ -829,10 +976,29 @@ func (m Model) updateDupesResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) doDupesClean() tea.Cmd {
+func listenDupesCleanProgress(ch chan dupesCleanProgressMsg) tea.Cmd {
 	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return msg
+	}
+}
+
+func (m *Model) doDupesClean() tea.Cmd {
+	total := len(m.dupSelected)
+
+	ch := make(chan dupesCleanProgressMsg, 1)
+	m.dupCleaning = true
+	m.dupCleanDone = 0
+	m.dupCleanTotal = total
+	m.dupCleanCh = ch
+
+	cleanCmd := func() tea.Msg {
 		var deleted, failed int
 		var freed int64
+		var done int
 		for gi, g := range m.dupGroups {
 			for fi, f := range g.Files {
 				key := fmt.Sprintf("%d:%d", gi, fi)
@@ -845,10 +1011,18 @@ func (m Model) doDupesClean() tea.Cmd {
 					deleted++
 					freed += g.Size
 				}
+				done++
+				select {
+				case ch <- dupesCleanProgressMsg{done: done, total: total}:
+				default:
+				}
 			}
 		}
+		close(ch)
 		return dupesCleanDoneMsg{deleted: deleted, failed: failed, freed: freed}
 	}
+
+	return tea.Batch(cleanCmd, listenDupesCleanProgress(ch))
 }
 
 func (m Model) updateUninstallInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -994,14 +1168,40 @@ func (m Model) doUninstallClean() tea.Cmd {
 	}
 }
 
-func (m Model) doClean() tea.Cmd {
+func listenCleanProgress(ch chan cleanProgressMsg) tea.Cmd {
 	return func() tea.Msg {
-		if m.categoryIdx >= len(m.results) {
-			return cleanDoneMsg{}
+		msg, ok := <-ch
+		if !ok {
+			return nil
 		}
-		targets := m.results[m.categoryIdx].Targets
+		return msg
+	}
+}
+
+func (m *Model) doClean() tea.Cmd {
+	if m.categoryIdx >= len(m.results) {
+		return func() tea.Msg { return cleanDoneMsg{} }
+	}
+	targets := m.results[m.categoryIdx].Targets
+
+	// Count selected items for progress total.
+	var total int
+	for i := range targets {
+		if m.selected[i] {
+			total++
+		}
+	}
+
+	ch := make(chan cleanProgressMsg, 1)
+	m.cleaning = true
+	m.cleanDone = 0
+	m.cleanTotal = total
+	m.cleanDoneCh = ch
+
+	cleanCmd := func() tea.Msg {
 		var cleaned, failed int
 		var totalSize int64
+		var done int
 		for i, t := range targets {
 			if !m.selected[i] {
 				continue
@@ -1012,21 +1212,27 @@ func (m Model) doClean() tea.Cmd {
 				cleaned++
 				totalSize += t.Size
 			}
+			done++
+			select {
+			case ch <- cleanProgressMsg{done: done, total: total}:
+			default:
+			}
 		}
+		close(ch)
 		return cleanDoneMsg{cleaned: cleaned, failed: failed, size: totalSize}
 	}
+
+	return tea.Batch(cleanCmd, listenCleanProgress(ch))
 }
 
 // --- Views ---
 
 func (m Model) View() string {
-	if m.scanning {
-		return titleStyle.Render("macbroom") + "\n\n" + m.spinner.View() + " Scanning your Mac...\n"
-	}
-
 	switch m.currentView {
 	case viewMenu:
 		return m.viewMenu()
+	case viewScanning:
+		return m.viewScanProgress()
 	case viewDashboard:
 		return m.viewDashboard()
 	case viewCategory:
@@ -1061,7 +1267,7 @@ func (m Model) View() string {
 }
 
 func (m Model) viewMenu() string {
-	s := titleStyle.Render("macbroom") + "\n\n"
+	s := renderHeader()
 
 	for i, item := range menuItems {
 		if i == m.cursor {
@@ -1071,16 +1277,51 @@ func (m Model) viewMenu() string {
 		}
 	}
 
-	s += helpStyle.Render("\n\nj/k navigate | enter select | q quit")
+	s += renderFooter("j/k navigate | enter select | q quit")
+	return s
+}
+
+func (m Model) updateScanning(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "esc" || msg.String() == "backspace" {
+		m.scanning = false
+		m.scanStatuses = nil
+		m.scanProgressCh = nil
+		m.currentView = viewMenu
+		m.cursor = 0
+	}
+	return m, nil
+}
+
+func (m Model) viewScanProgress() string {
+	s := renderHeader("Clean")
+
+	for _, ss := range m.scanStatuses {
+		var icon, detail string
+		switch ss.status {
+		case engine.ScanWaiting:
+			icon = dimStyle.Render("○")
+			detail = dimStyle.Render("waiting...")
+		case engine.ScanStarted:
+			icon = m.spinner.View()
+			detail = "scanning..."
+		case engine.ScanDone:
+			icon = successStyle.Render("✓")
+			detail = fmt.Sprintf("%d items   %s", ss.count, utils.FormatSize(ss.size))
+		}
+		line := fmt.Sprintf("  %s %-20s %s", icon, ss.name, detail)
+		s += line + "\n"
+	}
+
+	s += renderFooter("esc cancel | q quit")
 	return s
 }
 
 func (m Model) viewDashboard() string {
-	s := titleStyle.Render("macbroom -- Clean") + "\n\n"
+	s := renderHeader("Clean")
 
 	if len(m.results) == 0 {
 		s += "No junk found. Your Mac is clean!\n"
-		return s + helpStyle.Render("\nesc back | q quit")
+		return s + renderFooter("esc back | q quit")
 	}
 
 	var totalSize int64
@@ -1092,19 +1333,23 @@ func (m Model) viewDashboard() string {
 		totalSize += catSize
 
 		cursor := "  "
-		style := dimStyle
 		if i == m.cursor {
 			cursor = "> "
-			style = selectedStyle
 		}
 
-		line := fmt.Sprintf("%s%-25s %10s  (%d items)",
-			cursor, r.Category, utils.FormatSize(catSize), len(r.Targets))
-		s += style.Render(line) + "\n"
+		dot := lipgloss.NewStyle().Foreground(categoryColor(r.Category)).Render("\u25cf")
+		line := fmt.Sprintf("%s%s %-23s %10s  (%d items)",
+			cursor, dot, r.Category, utils.FormatSize(catSize), len(r.Targets))
+
+		if i == m.cursor {
+			s += selectedStyle.Render(line) + "\n"
+		} else {
+			s += line + "\n"
+		}
 	}
 
-	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Total reclaimable: %s ", utils.FormatSize(totalSize)))
-	s += helpStyle.Render("\n\nj/k navigate | enter view details | esc back | q quit")
+	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Total reclaimable: %s ", utils.FormatSize(m.animatedSize(totalSize))))
+	s += renderFooter("j/k navigate | enter view details | esc back | q quit")
 	return s
 }
 
@@ -1114,7 +1359,7 @@ func (m Model) viewCategory() string {
 	}
 
 	r := m.results[m.categoryIdx]
-	s := titleStyle.Render("macbroom -- "+r.Category) + "\n\n"
+	s := renderHeader("Clean", r.Category)
 
 	if r.Error != nil {
 		s += fmt.Sprintf("Error scanning: %v\n", r.Error)
@@ -1165,7 +1410,7 @@ func (m Model) viewCategory() string {
 	}
 
 	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Selected: %d items (%s) ", selectedCount, utils.FormatSize(selectedSize)))
-	s += helpStyle.Render("\n\nj/k navigate | space toggle | a toggle all | d delete | esc back | q quit")
+	s += renderFooter("j/k navigate | space toggle | a toggle all | d delete | esc back | q quit")
 	return s
 }
 
@@ -1176,13 +1421,18 @@ func (m Model) viewConfirm() string {
 
 	r := m.results[m.categoryIdx]
 
-	dangerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("196")).
-		Background(lipgloss.Color("52")).
-		Padding(0, 1)
+	s := renderHeader("Clean", r.Category, "Confirm")
 
-	s := dangerStyle.Render(" CONFIRM DELETION ") + "\n\n"
+	if m.cleaning {
+		s += "\n" + m.spinner.View() + " Cleaning...\n"
+		if m.cleanTotal > 0 {
+			ratio := float64(m.cleanDone) / float64(m.cleanTotal)
+			s += fmt.Sprintf("  %s %d/%d items\n", renderProgressBar(ratio, 30), m.cleanDone, m.cleanTotal)
+		}
+		return s
+	}
+
+	s += dangerBannerStyle.Render(" CONFIRM DELETION ") + "\n\n"
 
 	var selectedSize int64
 	var selectedCount int
@@ -1205,32 +1455,29 @@ func (m Model) viewConfirm() string {
 
 	s += "\n"
 	if hasRisky {
-		warnStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214"))
 		s += warnStyle.Render("  WARNING: Selection includes risky items that may contain user data!") + "\n\n"
 	}
 
 	s += fmt.Sprintf("  %d items | %s | will be moved to Trash (recoverable)\n", selectedCount, utils.FormatSize(selectedSize))
-	s += helpStyle.Render("\n  y confirm | n cancel | q quit")
+	s += renderFooter("y confirm | n cancel | q quit")
 	return s
 }
 
 func (m Model) viewResult() string {
-	s := titleStyle.Render("macbroom -- Cleanup Complete") + "\n\n"
+	s := renderHeader("Cleanup Complete")
 
-	successStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82"))
-	failStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
-
-	s += successStyle.Render(fmt.Sprintf("  Cleaned: %d items (%s freed)", m.lastCleaned, utils.FormatSize(m.lastSize))) + "\n"
+	freed := m.animatedSize(m.lastSize)
+	s += successStyle.Render(fmt.Sprintf("  Cleaned: %d items (%s freed)", m.lastCleaned, utils.FormatSize(freed))) + "\n"
 	if m.lastFailed > 0 {
 		s += failStyle.Render(fmt.Sprintf("  Failed:  %d items", m.lastFailed)) + "\n"
 	}
 
-	s += helpStyle.Render("\n  r re-scan | esc menu | q quit")
+	s += renderFooter("r re-scan | esc menu | q quit")
 	return s
 }
 
 func (m Model) viewSpaceLens() string {
-	s := titleStyle.Render("macbroom -- Space Lens") + "\n"
+	s := renderHeader("Space Lens")
 
 	if m.slLoading {
 		s += dimStyle.Render(m.slPath) + "\n\n"
@@ -1242,70 +1489,44 @@ func (m Model) viewSpaceLens() string {
 			}
 			s += dimStyle.Render("  "+name) + "\n"
 		}
-		s += helpStyle.Render("\nesc cancel")
+		s += renderFooter("esc cancel")
 		return s
 	}
 
-	// Calculate total size for header and percentages.
 	var totalSize int64
 	for _, node := range m.slNodes {
 		totalSize += node.Size
 	}
-
 	s += dimStyle.Render(fmt.Sprintf("%s (%s)", m.slPath, utils.FormatSize(totalSize))) + "\n\n"
 
 	if len(m.slNodes) == 0 {
 		s += "Empty directory.\n"
-		return s + helpStyle.Render("\nesc back | q quit")
+		return s + renderFooter("esc back | q quit")
 	}
 
-	maxSize := m.slNodes[0].Size
-	visible := m.visibleItemCount()
-	total := len(m.slNodes)
-	end := m.slScrollOffset + visible
-	if end > total {
-		end = total
+	// Reserve lines for header (4) and footer (3).
+	tmapHeight := m.height - 7
+	tmapWidth := m.width - 2
+	if tmapHeight < 4 {
+		tmapHeight = 4
+	}
+	if tmapWidth < 20 {
+		tmapWidth = 20
 	}
 
-	for i := m.slScrollOffset; i < end; i++ {
-		node := m.slNodes[i]
-		cursor := "  "
-		if i == m.slCursor {
-			cursor = "> "
-		}
+	s += renderTreemap(m.slNodes, tmapWidth, tmapHeight, m.slCursor)
 
-		icon := "  "
+	// Show selected item info below.
+	if m.slCursor < len(m.slNodes) {
+		node := m.slNodes[m.slCursor]
+		info := fmt.Sprintf("  %s  %s", node.Name, utils.FormatSize(node.Size))
 		if node.IsDir {
-			icon = "D "
+			info += "  [dir]"
 		}
-
-		name := node.Name
-		if len(name) > 30 {
-			name = name[:27] + "..."
-		}
-
-		pct := 0
-		if totalSize > 0 {
-			pct = int(float64(node.Size) / float64(totalSize) * 100)
-		}
-
-		bar := renderBar(node.Size, maxSize, 25)
-		line := fmt.Sprintf("%s%s %-30s %10s  %3d%%  %s",
-			cursor, icon, name, utils.FormatSize(node.Size), pct, bar)
-
-		if i == m.slCursor {
-			s += selectedStyle.Render(line) + "\n"
-		} else {
-			s += line + "\n"
-		}
+		s += selectedStyle.Render(info) + "\n"
 	}
 
-	// Scroll indicator
-	if total > visible {
-		s += dimStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.slScrollOffset+1, end, total)) + "\n"
-	}
-
-	s += helpStyle.Render("\nj/k navigate | enter drill in | d delete | h go up | esc back | q quit")
+	s += renderFooter("arrows navigate | enter drill in | d delete | h go up | esc back | q quit")
 	return s
 }
 
@@ -1314,24 +1535,20 @@ func (m Model) viewSpaceLensConfirm() string {
 		return "Nothing to confirm"
 	}
 
-	dangerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("196")).
-		Background(lipgloss.Color("52")).
-		Padding(0, 1)
-
-	s := dangerStyle.Render(" DELETE ITEM ") + "\n\n"
+	s := renderHeader("Space Lens", "Confirm")
+	s += dangerBannerStyle.Render(" DELETE ITEM ") + "\n\n"
 	s += fmt.Sprintf("  Delete %s (%s)? (y/n)\n", m.slDeleteTarget.Name, utils.FormatSize(m.slDeleteTarget.Size))
 	s += dimStyle.Render(fmt.Sprintf("\n  Path: %s", m.slDeleteTarget.Path)) + "\n"
-	s += helpStyle.Render("\n  y confirm | n cancel | q quit")
+	s += renderFooter("y confirm | n cancel | q quit")
 	return s
 }
 
 func (m Model) viewDupes() string {
-	s := titleStyle.Render("macbroom -- Duplicates") + "\n"
+	s := renderHeader("Duplicates")
 
 	if m.dupLoading {
-		s += "\n" + m.spinner.View() + " Scanning for duplicates...\n"
+		s += "\n"
+		s += m.spinner.View() + fmt.Sprintf(" Scanning... %d files checked", m.dupDone) + "\n"
 		if m.dupScanning != "" {
 			name := m.dupScanning
 			if len(name) > 50 {
@@ -1339,13 +1556,13 @@ func (m Model) viewDupes() string {
 			}
 			s += dimStyle.Render("  "+name) + "\n"
 		}
-		s += helpStyle.Render("\nesc cancel")
+		s += renderFooter("esc cancel")
 		return s
 	}
 
 	if len(m.dupGroups) == 0 {
 		s += "\nNo duplicates found!\n"
-		return s + helpStyle.Render("\nesc back | q quit")
+		return s + renderFooter("esc back | q quit")
 	}
 
 	var totalWasted int64
@@ -1426,18 +1643,23 @@ func (m Model) viewDupes() string {
 	}
 
 	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Selected: %d copies (%s) ", selectedCount, utils.FormatSize(selectedSize)))
-	s += helpStyle.Render("\n\nj/k navigate | space toggle | d delete selected | esc back | q quit")
+	s += renderFooter("j/k navigate | space toggle | d delete selected | esc back | q quit")
 	return s
 }
 
 func (m Model) viewDupesConfirm() string {
-	dangerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("196")).
-		Background(lipgloss.Color("52")).
-		Padding(0, 1)
+	s := renderHeader("Duplicates", "Confirm")
 
-	s := dangerStyle.Render(" CONFIRM DUPLICATE DELETION ") + "\n\n"
+	if m.dupCleaning {
+		s += "\n" + m.spinner.View() + " Removing duplicates...\n"
+		if m.dupCleanTotal > 0 {
+			ratio := float64(m.dupCleanDone) / float64(m.dupCleanTotal)
+			s += fmt.Sprintf("  %s %d/%d items\n", renderProgressBar(ratio, 30), m.dupCleanDone, m.dupCleanTotal)
+		}
+		return s
+	}
+
+	s += dangerBannerStyle.Render(" CONFIRM DUPLICATE DELETION ") + "\n\n"
 
 	var selectedSize int64
 	var selectedCount int
@@ -1453,37 +1675,34 @@ func (m Model) viewDupesConfirm() string {
 	s += fmt.Sprintf("  %d duplicate copies | %s | will be moved to Trash (recoverable)\n",
 		selectedCount, utils.FormatSize(selectedSize))
 	s += dimStyle.Render("\n  One copy per group will be kept.") + "\n"
-	s += helpStyle.Render("\n  y confirm | n cancel | q quit")
+	s += renderFooter("y confirm | n cancel | q quit")
 	return s
 }
 
 func (m Model) viewDupesResult() string {
-	s := titleStyle.Render("macbroom -- Duplicates Cleaned") + "\n\n"
-
-	successStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82"))
-	failStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
+	s := renderHeader("Duplicates", "Complete")
 
 	s += successStyle.Render(fmt.Sprintf("  Deleted: %d copies (%s freed)", m.dupDeleted, utils.FormatSize(m.dupFreed))) + "\n"
 	if m.dupFailed > 0 {
 		s += failStyle.Render(fmt.Sprintf("  Failed:  %d items", m.dupFailed)) + "\n"
 	}
 
-	s += helpStyle.Render("\n  r re-scan | esc menu | q quit")
+	s += renderFooter("r re-scan | esc menu | q quit")
 	return s
 }
 
 func (m Model) viewUninstallInput() string {
-	s := titleStyle.Render("macbroom -- Uninstall") + "\n\n"
+	s := renderHeader("Uninstall")
 
 	if m.uiLoading {
 		s += m.spinner.View() + " Searching for app files...\n"
-		s += helpStyle.Render("\nesc cancel")
+		s += renderFooter("esc cancel")
 		return s
 	}
 
 	if len(m.uiApps) == 0 {
 		s += "  No applications found.\n"
-		return s + helpStyle.Render("\nesc back | q quit")
+		return s + renderFooter("esc back | q quit")
 	}
 
 	selectedCount := len(m.uiAppSelected)
@@ -1520,16 +1739,16 @@ func (m Model) viewUninstallInput() string {
 		s += dimStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.uiAppScrollOffset+1, end, total)) + "\n"
 	}
 
-	s += helpStyle.Render("\n\nj/k navigate | space select | enter scan selected | esc back | q quit")
+	s += renderFooter("j/k navigate | space select | enter scan selected | esc back | q quit")
 	return s
 }
 
 func (m Model) viewUninstallResults() string {
-	s := titleStyle.Render("macbroom -- Uninstall") + "\n\n"
+	s := renderHeader("Uninstall", "Files")
 
 	if len(m.uiTargets) == 0 {
 		s += "  No related files found for the selected apps.\n"
-		return s + helpStyle.Render("\nesc back | q quit")
+		return s + renderFooter("esc back | q quit")
 	}
 
 	// Build a summary of selected app names.
@@ -1591,18 +1810,13 @@ func (m Model) viewUninstallResults() string {
 	}
 
 	s += "\n" + statusBarStyle.Render(fmt.Sprintf(" Selected: %d items (%s) ", selectedFileCount, utils.FormatSize(selectedSize)))
-	s += helpStyle.Render("\n\nj/k navigate | space toggle | a toggle all | d delete | esc back | q quit")
+	s += renderFooter("j/k navigate | space toggle | a toggle all | d delete | esc back | q quit")
 	return s
 }
 
 func (m Model) viewUninstallConfirm() string {
-	dangerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("196")).
-		Background(lipgloss.Color("52")).
-		Padding(0, 1)
-
-	s := dangerStyle.Render(" CONFIRM UNINSTALL ") + "\n\n"
+	s := renderHeader("Uninstall", "Confirm")
+	s += dangerBannerStyle.Render(" CONFIRM UNINSTALL ") + "\n\n"
 
 	var selectedSize int64
 	var selectedCount int
@@ -1615,28 +1829,24 @@ func (m Model) viewUninstallConfirm() string {
 	}
 
 	s += fmt.Sprintf("\n  %d items | %s | will be moved to Trash (recoverable)\n", selectedCount, utils.FormatSize(selectedSize))
-	s += helpStyle.Render("\n  y confirm | n cancel | q quit")
+	s += renderFooter("y confirm | n cancel | q quit")
 	return s
 }
 
 func (m Model) viewMaintain() string {
-	s := titleStyle.Render("macbroom -- Maintenance") + "\n\n"
-	s += m.spinner.View() + " Running maintenance tasks...\n"
+	s := renderHeader("Maintenance")
+	s += "\n" + m.spinner.View() + " Running maintenance tasks...\n"
 	return s
 }
 
 func (m Model) viewMaintainResult() string {
-	s := titleStyle.Render("macbroom -- Maintenance Complete") + "\n\n"
-
-	successStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("82"))
-	failStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
-	skipStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	s := renderHeader("Maintenance", "Complete")
 
 	for _, r := range m.maintainResults {
 		if r.Success {
 			s += successStyle.Render(fmt.Sprintf("  [OK]     %s", r.Task.Name)) + "\n"
 		} else if r.Task.NeedsSudo {
-			s += skipStyle.Render(fmt.Sprintf("  [SKIP]   %s (requires sudo)", r.Task.Name)) + "\n"
+			s += warnStyle.Render(fmt.Sprintf("  [SKIP]   %s (requires sudo)", r.Task.Name)) + "\n"
 		} else {
 			s += failStyle.Render(fmt.Sprintf("  [FAIL]   %s: %v", r.Task.Name, r.Error)) + "\n"
 		}
@@ -1653,7 +1863,7 @@ func (m Model) viewMaintainResult() string {
 		s += dimStyle.Render("\n  Tip: run 'macbroom maintain' in terminal for sudo tasks") + "\n"
 	}
 
-	s += helpStyle.Render("\nesc back | q quit")
+	s += renderFooter("esc back | q quit")
 	return s
 }
 

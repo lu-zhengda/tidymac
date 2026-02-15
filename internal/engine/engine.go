@@ -99,3 +99,71 @@ func (e *Engine) ScanGrouped(ctx context.Context) []ScanResult {
 	wg.Wait()
 	return results
 }
+
+// ScanStatus represents the state of a scanner in the progress callback.
+type ScanStatus int
+
+const (
+	ScanWaiting ScanStatus = iota
+	ScanStarted
+	ScanDone
+)
+
+// ScanProgress is sent to the progress callback for each scanner event.
+type ScanProgress struct {
+	Name    string
+	Status  ScanStatus
+	Targets []scanner.Target
+	Error   error
+}
+
+// ScanGroupedWithProgress runs scanners with a concurrency limit and calls
+// onProgress for each scanner event (started, done).
+func (e *Engine) ScanGroupedWithProgress(ctx context.Context, concurrency int, onProgress func(ScanProgress)) []ScanResult {
+	if concurrency < 1 {
+		concurrency = 1
+	}
+
+	var (
+		mu      sync.Mutex
+		wg      sync.WaitGroup
+		results []ScanResult
+		sem     = make(chan struct{}, concurrency)
+	)
+
+	for _, s := range e.scanners {
+		wg.Add(1)
+		go func(s scanner.Scanner) {
+			defer wg.Done()
+
+			sem <- struct{}{} // acquire
+			if onProgress != nil {
+				onProgress(ScanProgress{Name: s.Name(), Status: ScanStarted})
+			}
+
+			targets, err := s.Scan(ctx)
+
+			<-sem // release
+
+			if onProgress != nil {
+				onProgress(ScanProgress{
+					Name:    s.Name(),
+					Status:  ScanDone,
+					Targets: targets,
+					Error:   err,
+				})
+			}
+
+			mu.Lock()
+			results = append(results, ScanResult{
+				Category: s.Name(),
+				Targets:  targets,
+				Error:    err,
+			})
+			mu.Unlock()
+		}(s)
+	}
+
+	wg.Wait()
+	return results
+}

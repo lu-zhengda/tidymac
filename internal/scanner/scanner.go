@@ -8,7 +8,7 @@ import (
 type RiskLevel int
 
 const (
-	Safe     RiskLevel = iota
+	Safe RiskLevel = iota
 	Moderate
 	Risky
 )

@@ -99,6 +99,15 @@ func groupBySize(ctx context.Context, dirs []string, minSize int64, onProgress P
 				if d.Name() == ".git" {
 					return fs.SkipDir
 				}
+				// Skip git repository roots (directories containing .git).
+				if _, err := os.Stat(filepath.Join(path, ".git")); err == nil {
+					return fs.SkipDir
+				}
+				return nil
+			}
+
+			// Skip hidden files (dotfiles).
+			if d.Name()[0] == '.' {
 				return nil
 			}
 

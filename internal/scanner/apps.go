@@ -19,9 +19,11 @@ func NewAppScanner(appsDir, libraryBase string) *AppScanner {
 	return &AppScanner{appsDir: appsDir, libraryBase: libraryBase}
 }
 
-func (a *AppScanner) Name() string        { return "App Uninstaller" }
-func (a *AppScanner) Description() string { return "Find and remove applications with all related files" }
-func (a *AppScanner) Risk() RiskLevel     { return Moderate }
+func (a *AppScanner) Name() string { return "App Uninstaller" }
+func (a *AppScanner) Description() string {
+	return "Find and remove applications with all related files"
+}
+func (a *AppScanner) Risk() RiskLevel { return Moderate }
 
 func (a *AppScanner) apps() string {
 	if a.appsDir != "" {

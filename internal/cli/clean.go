@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/lu-zhengda/macbroom/internal/history"
 	"github.com/lu-zhengda/macbroom/internal/schedule"
 	"github.com/lu-zhengda/macbroom/internal/trash"
 	"github.com/lu-zhengda/macbroom/internal/utils"
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -24,6 +24,10 @@ var (
 	cleanNode      bool
 	cleanHomebrew  bool
 	cleanSimulator bool
+	cleanPython    bool
+	cleanRust      bool
+	cleanGo        bool
+	cleanJetBrains bool
 )
 
 // cleanPrint prints to stdout only when --quiet is not set.
@@ -45,7 +49,7 @@ var cleanCmd = &cobra.Command{
 	Short: "Clean selected junk files",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e := buildEngine()
-		cats := selectedCategories(cleanSystem, cleanBrowser, cleanXcode, cleanLarge, cleanDocker, cleanNode, cleanHomebrew, cleanSimulator)
+		cats := selectedCategories(cleanSystem, cleanBrowser, cleanXcode, cleanLarge, cleanDocker, cleanNode, cleanHomebrew, cleanSimulator, cleanPython, cleanRust, cleanGo, cleanJetBrains)
 
 		cleanPrintln("Scanning...")
 		targets, err := scanWithCategories(e, cats)
@@ -170,4 +174,8 @@ func init() {
 	cleanCmd.Flags().BoolVar(&cleanNode, "node", false, "Clean Node.js cache only")
 	cleanCmd.Flags().BoolVar(&cleanHomebrew, "homebrew", false, "Clean Homebrew cache only")
 	cleanCmd.Flags().BoolVar(&cleanSimulator, "simulator", false, "Clean iOS Simulator data only")
+	cleanCmd.Flags().BoolVar(&cleanPython, "python", false, "Clean Python cache only")
+	cleanCmd.Flags().BoolVar(&cleanRust, "rust", false, "Clean Rust cache only")
+	cleanCmd.Flags().BoolVar(&cleanGo, "go", false, "Clean Go cache only")
+	cleanCmd.Flags().BoolVar(&cleanJetBrains, "jetbrains", false, "Clean JetBrains cache only")
 }

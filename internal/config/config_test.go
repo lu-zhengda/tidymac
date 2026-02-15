@@ -84,6 +84,22 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
+func TestDefaultConfig_NewScanners(t *testing.T) {
+	cfg := Default()
+	if !cfg.Scanners.Python {
+		t.Error("expected Python scanner enabled by default")
+	}
+	if !cfg.Scanners.Rust {
+		t.Error("expected Rust scanner enabled by default")
+	}
+	if !cfg.Scanners.Go {
+		t.Error("expected Go scanner enabled by default")
+	}
+	if !cfg.Scanners.JetBrains {
+		t.Error("expected JetBrains scanner enabled by default")
+	}
+}
+
 func TestLoadFromFile(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")

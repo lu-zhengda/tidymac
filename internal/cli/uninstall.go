@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/spf13/cobra"
 	"github.com/lu-zhengda/macbroom/internal/scanner"
 	"github.com/lu-zhengda/macbroom/internal/trash"
 	"github.com/lu-zhengda/macbroom/internal/utils"
+	"github.com/spf13/cobra"
 )
 
 var (

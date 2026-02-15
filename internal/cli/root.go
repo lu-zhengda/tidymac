@@ -8,12 +8,12 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/spf13/cobra"
 	"github.com/lu-zhengda/macbroom/internal/config"
 	"github.com/lu-zhengda/macbroom/internal/engine"
 	"github.com/lu-zhengda/macbroom/internal/scanner"
 	"github.com/lu-zhengda/macbroom/internal/tui"
 	"github.com/lu-zhengda/macbroom/internal/utils"
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -136,12 +136,32 @@ func buildEngine() *engine.Engine {
 	if appConfig.Scanners.IOSSimulators {
 		e.Register(scanner.NewSimulatorScanner(""))
 	}
+	if appConfig.Scanners.Python {
+		home := utils.HomeDir()
+		paths := expandPaths(appConfig.LargeFiles.Paths)
+		minAge := config.ParseDuration(appConfig.LargeFiles.MinAge)
+		e.Register(scanner.NewPythonScanner(home, paths, minAge))
+	}
+	if appConfig.Scanners.Rust {
+		home := utils.HomeDir()
+		paths := expandPaths(appConfig.LargeFiles.Paths)
+		minAge := config.ParseDuration(appConfig.LargeFiles.MinAge)
+		e.Register(scanner.NewRustScanner(home, paths, minAge))
+	}
+	if appConfig.Scanners.Go {
+		home := utils.HomeDir()
+		e.Register(scanner.NewGoScanner(home))
+	}
+	if appConfig.Scanners.JetBrains {
+		home := utils.HomeDir()
+		e.Register(scanner.NewJetBrainsScanner(home))
+	}
 
 	return e
 }
 
-func selectedCategories(system, browser, xcode, large, docker, node, homebrew, simulator bool) []string {
-	if !system && !browser && !xcode && !large && !docker && !node && !homebrew && !simulator {
+func selectedCategories(system, browser, xcode, large, docker, node, homebrew, simulator, python, rust, golang, jetbrains bool) []string {
+	if !system && !browser && !xcode && !large && !docker && !node && !homebrew && !simulator && !python && !rust && !golang && !jetbrains {
 		return nil
 	}
 	var cats []string
@@ -168,6 +188,18 @@ func selectedCategories(system, browser, xcode, large, docker, node, homebrew, s
 	}
 	if simulator {
 		cats = append(cats, "iOS Simulators")
+	}
+	if python {
+		cats = append(cats, "Python")
+	}
+	if rust {
+		cats = append(cats, "Rust")
+	}
+	if golang {
+		cats = append(cats, "Go")
+	}
+	if jetbrains {
+		cats = append(cats, "JetBrains")
 	}
 	return cats
 }

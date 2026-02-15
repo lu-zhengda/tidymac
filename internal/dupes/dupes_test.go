@@ -171,6 +171,73 @@ func TestSkipsGitDirs(t *testing.T) {
 	}
 }
 
+func TestSkipsHiddenFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	content := []byte("hidden file content that is duplicated")
+
+	// Two hidden files with identical content.
+	if err := os.WriteFile(filepath.Join(dir, ".localized"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(sub, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, ".localized"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	groups, err := dupes.Find(context.Background(), []string{dir}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(groups) != 0 {
+		t.Fatalf("expected 0 groups (hidden files should be skipped), got %d", len(groups))
+	}
+}
+
+func TestSkipsGitRepoRoots(t *testing.T) {
+	dir := t.TempDir()
+
+	content := []byte("identical build artifacts in a git repo")
+
+	// Create a git repo directory (has .git inside).
+	repo := filepath.Join(dir, "myproject")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Build artifact inside repo.
+	binDir := filepath.Join(repo, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(binDir, "app"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	// Another copy at repo root.
+	if err := os.WriteFile(filepath.Join(repo, "app"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// File outside any repo — should still be found.
+	if err := os.WriteFile(filepath.Join(dir, "standalone.txt"), content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	groups, err := dupes.Find(context.Background(), []string{dir}, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Only standalone.txt is visible; repo files are skipped entirely.
+	// With just 1 file visible, no duplicates.
+	if len(groups) != 0 {
+		t.Fatalf("expected 0 groups (git repo files should be skipped), got %d", len(groups))
+	}
+}
+
 func TestMultipleDirs(t *testing.T) {
 	dir1 := t.TempDir()
 	dir2 := t.TempDir()

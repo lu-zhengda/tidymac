@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/lu-zhengda/macbroom/internal/dupes"
 	"github.com/lu-zhengda/macbroom/internal/trash"
 	"github.com/lu-zhengda/macbroom/internal/utils"
+	"github.com/spf13/cobra"
 )
 
 var (

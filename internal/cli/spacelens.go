@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/spf13/cobra"
 	"github.com/lu-zhengda/macbroom/internal/scanner"
 	"github.com/lu-zhengda/macbroom/internal/tui"
 	"github.com/lu-zhengda/macbroom/internal/utils"
+	"github.com/spf13/cobra"
 )
 
 var (

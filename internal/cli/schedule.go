@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/lu-zhengda/macbroom/internal/schedule"
+	"github.com/spf13/cobra"
 )
 
 var scheduleCmd = &cobra.Command{
