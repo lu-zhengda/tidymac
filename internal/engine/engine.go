@@ -15,7 +15,8 @@ type ScanResult struct {
 }
 
 type Engine struct {
-	scanners []scanner.Scanner
+	scanners    []scanner.Scanner
+	excludeFunc func(string) bool
 }
 
 func New() *Engine {
@@ -26,8 +27,25 @@ func (e *Engine) Register(s scanner.Scanner) {
 	e.scanners = append(e.scanners, s)
 }
 
+func (e *Engine) SetExcludeFunc(fn func(string) bool) {
+	e.excludeFunc = fn
+}
+
 func (e *Engine) Scanners() []scanner.Scanner {
 	return e.scanners
+}
+
+func (e *Engine) filterExcluded(targets []scanner.Target) []scanner.Target {
+	if e.excludeFunc == nil {
+		return targets
+	}
+	filtered := make([]scanner.Target, 0, len(targets))
+	for _, t := range targets {
+		if !e.excludeFunc(t.Path) {
+			filtered = append(filtered, t)
+		}
+	}
+	return filtered
 }
 
 func (e *Engine) ScanAll(ctx context.Context) ([]scanner.Target, error) {
@@ -60,15 +78,16 @@ func (e *Engine) ScanAll(ctx context.Context) ([]scanner.Target, error) {
 	wg.Wait()
 
 	if len(errs) > 0 {
-		return targets, fmt.Errorf("scan errors: %v", errs)
+		return e.filterExcluded(targets), fmt.Errorf("scan errors: %v", errs)
 	}
-	return targets, nil
+	return e.filterExcluded(targets), nil
 }
 
 func (e *Engine) ScanByCategory(ctx context.Context, category string) ([]scanner.Target, error) {
 	for _, s := range e.scanners {
 		if s.Name() == category {
-			return s.Scan(ctx)
+			targets, err := s.Scan(ctx)
+			return e.filterExcluded(targets), err
 		}
 	}
 	return nil, fmt.Errorf("unknown category: %s", category)
@@ -86,6 +105,7 @@ func (e *Engine) ScanGrouped(ctx context.Context) []ScanResult {
 		go func(s scanner.Scanner) {
 			defer wg.Done()
 			targets, err := s.Scan(ctx)
+			targets = e.filterExcluded(targets)
 			mu.Lock()
 			defer mu.Unlock()
 			results = append(results, ScanResult{
@@ -142,6 +162,7 @@ func (e *Engine) ScanGroupedWithProgress(ctx context.Context, concurrency int, o
 			}
 
 			targets, err := s.Scan(ctx)
+			targets = e.filterExcluded(targets)
 
 			<-sem // release
 
