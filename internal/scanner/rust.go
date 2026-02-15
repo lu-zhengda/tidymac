@@ -26,9 +26,11 @@ func NewRustScanner(home string, searchPaths []string, maxAge time.Duration) *Ru
 	return &RustScanner{home: home, searchPaths: searchPaths, maxAge: maxAge}
 }
 
-func (s *RustScanner) Name() string        { return "Rust" }
-func (s *RustScanner) Description() string { return "Cargo registry cache and stale target directories" }
-func (s *RustScanner) Risk() RiskLevel     { return Safe }
+func (s *RustScanner) Name() string { return "Rust" }
+func (s *RustScanner) Description() string {
+	return "Cargo registry cache and stale target directories"
+}
+func (s *RustScanner) Risk() RiskLevel { return Safe }
 
 func (s *RustScanner) Scan(ctx context.Context) ([]Target, error) {
 	if ctx.Err() != nil {
