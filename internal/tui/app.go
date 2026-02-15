@@ -642,15 +642,12 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "up", "k":
 		if m.slCursor > 0 {
 			m.slCursor--
-			m.slEnsureCursorVisible()
 		}
 	case "down", "j":
-		max := len(m.slNodes) - 1
-		if m.slCursor < max {
+		if m.slCursor < len(m.slNodes)-1 {
 			m.slCursor++
-			m.slEnsureCursorVisible()
 		}
-	case "enter":
+	case "enter", "right", "l":
 		if m.slCursor < len(m.slNodes) && m.slNodes[m.slCursor].IsDir {
 			m.slPath = m.slNodes[m.slCursor].Path
 			m.slLoading = true
@@ -667,7 +664,7 @@ func (m Model) updateSpaceLens(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.slDeleteTarget = &node
 			m.currentView = viewSpaceLensConfirm
 		}
-	case "h":
+	case "left", "h":
 		// Go up one directory
 		if idx := lastSlash(m.slPath); idx > 0 {
 			m.slPath = m.slPath[:idx]
@@ -1345,12 +1342,10 @@ func (m Model) viewSpaceLens() string {
 		return s
 	}
 
-	// Calculate total size for header and percentages.
 	var totalSize int64
 	for _, node := range m.slNodes {
 		totalSize += node.Size
 	}
-
 	s += dimStyle.Render(fmt.Sprintf("%s (%s)", m.slPath, utils.FormatSize(totalSize))) + "\n\n"
 
 	if len(m.slNodes) == 0 {
@@ -1358,53 +1353,29 @@ func (m Model) viewSpaceLens() string {
 		return s + renderFooter("esc back | q quit")
 	}
 
-	maxSize := m.slNodes[0].Size
-	visible := m.visibleItemCount()
-	total := len(m.slNodes)
-	end := m.slScrollOffset + visible
-	if end > total {
-		end = total
+	// Reserve lines for header (4) and footer (3).
+	tmapHeight := m.height - 7
+	tmapWidth := m.width - 2
+	if tmapHeight < 4 {
+		tmapHeight = 4
+	}
+	if tmapWidth < 20 {
+		tmapWidth = 20
 	}
 
-	for i := m.slScrollOffset; i < end; i++ {
-		node := m.slNodes[i]
-		cursor := "  "
-		if i == m.slCursor {
-			cursor = "> "
-		}
+	s += renderTreemap(m.slNodes, tmapWidth, tmapHeight, m.slCursor)
 
-		icon := "  "
+	// Show selected item info below.
+	if m.slCursor < len(m.slNodes) {
+		node := m.slNodes[m.slCursor]
+		info := fmt.Sprintf("  %s  %s", node.Name, utils.FormatSize(node.Size))
 		if node.IsDir {
-			icon = "D "
+			info += "  [dir]"
 		}
-
-		name := node.Name
-		if len(name) > 30 {
-			name = name[:27] + "..."
-		}
-
-		pct := 0
-		if totalSize > 0 {
-			pct = int(float64(node.Size) / float64(totalSize) * 100)
-		}
-
-		bar := renderBar(node.Size, maxSize, 25)
-		line := fmt.Sprintf("%s%s %-30s %10s  %3d%%  %s",
-			cursor, icon, name, utils.FormatSize(node.Size), pct, bar)
-
-		if i == m.slCursor {
-			s += selectedStyle.Render(line) + "\n"
-		} else {
-			s += line + "\n"
-		}
+		s += selectedStyle.Render(info) + "\n"
 	}
 
-	// Scroll indicator
-	if total > visible {
-		s += dimStyle.Render(fmt.Sprintf("  [%d-%d of %d]", m.slScrollOffset+1, end, total)) + "\n"
-	}
-
-	s += renderFooter("j/k navigate | enter drill in | d delete | h go up | esc back | q quit")
+	s += renderFooter("arrows navigate | enter drill in | d delete | h go up | esc back | q quit")
 	return s
 }
 
