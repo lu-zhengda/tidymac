@@ -23,7 +23,8 @@ const (
 		<string>{{.Binary}}</string>
 		<string>clean</string>
 		<string>--yes</string>
-		<string>--quiet</string>
+		<string>--quiet</string>{{range .ExtraArgs}}
+		<string>{{.}}</string>{{end}}
 	</array>
 	<key>StartCalendarInterval</key>
 	<dict>
@@ -45,12 +46,13 @@ const (
 
 // plistData holds the template fields for plist generation.
 type plistData struct {
-	Label   string
-	Binary  string
-	Hour    int
-	Minute  int
-	Weekday int // 0 = Sunday, 1 = Monday, ... 0 means omit (daily)
-	LogPath string
+	Label     string
+	Binary    string
+	Hour      int
+	Minute    int
+	Weekday   int // 0 = Sunday, 1 = Monday, ... 0 means omit (daily)
+	LogPath   string
+	ExtraArgs []string
 }
 
 // DefaultPath returns the default LaunchAgent plist file path.
@@ -118,18 +120,31 @@ func GeneratePlist(timeStr, interval string) string {
 // GeneratePlistWithBinary generates a plist using the specified binary path.
 // This is useful for testing.
 func GeneratePlistWithBinary(timeStr, interval, binary string) string {
+	return GeneratePlistWithCategories(timeStr, interval, binary, nil)
+}
+
+// GeneratePlistWithCategories generates a plist using the specified binary
+// path and optional category flags. Each category name is converted to a
+// CLI flag (e.g., "system" becomes "--system").
+func GeneratePlistWithCategories(timeStr, interval, binary string, categories []string) string {
 	hour, minute, err := parseTime(timeStr)
 	if err != nil {
 		return ""
 	}
 
+	var extraArgs []string
+	for _, cat := range categories {
+		extraArgs = append(extraArgs, "--"+cat)
+	}
+
 	data := plistData{
-		Label:   bundleID,
-		Binary:  binary,
-		Hour:    hour,
-		Minute:  minute,
-		Weekday: intervalWeekday(interval),
-		LogPath: logPath(),
+		Label:     bundleID,
+		Binary:    binary,
+		Hour:      hour,
+		Minute:    minute,
+		Weekday:   intervalWeekday(interval),
+		LogPath:   logPath(),
+		ExtraArgs: extraArgs,
 	}
 
 	tmpl, err := template.New("plist").Parse(plistTpl)
@@ -147,13 +162,13 @@ func GeneratePlistWithBinary(timeStr, interval, binary string) string {
 // Install writes the LaunchAgent plist file to the given path.
 // It only writes the file; loading via launchctl is the caller's
 // responsibility (e.g., the CLI layer).
-func Install(path, timeStr, interval string) error {
-	return InstallWithBinary(path, timeStr, interval, BinaryPath())
+func Install(path, timeStr, interval string, categories []string) error {
+	return InstallWithBinary(path, timeStr, interval, BinaryPath(), categories)
 }
 
 // InstallWithBinary writes the plist using a specified binary path.
-func InstallWithBinary(path, timeStr, interval, binary string) error {
-	plist := GeneratePlistWithBinary(timeStr, interval, binary)
+func InstallWithBinary(path, timeStr, interval, binary string, categories []string) error {
+	plist := GeneratePlistWithCategories(timeStr, interval, binary, categories)
 	if plist == "" {
 		return fmt.Errorf("failed to generate plist for time %q interval %q", timeStr, interval)
 	}

@@ -146,7 +146,7 @@ func TestInstallWritesFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, bundleID+".plist")
 
-	err := InstallWithBinary(path, "10:00", "daily", "/usr/local/bin/macbroom")
+	err := InstallWithBinary(path, "10:00", "daily", "/usr/local/bin/macbroom", nil)
 	if err != nil {
 		t.Fatalf("Install failed: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestInstallInvalidTime(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, bundleID+".plist")
 
-	err := InstallWithBinary(path, "bad", "daily", "/usr/local/bin/macbroom")
+	err := InstallWithBinary(path, "bad", "daily", "/usr/local/bin/macbroom", nil)
 	if err == nil {
 		t.Error("Install with invalid time should return error")
 	}
@@ -182,7 +182,7 @@ func TestInstallCreatesParentDir(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sub", "dir", bundleID+".plist")
 
-	err := InstallWithBinary(path, "10:00", "daily", "/usr/local/bin/macbroom")
+	err := InstallWithBinary(path, "10:00", "daily", "/usr/local/bin/macbroom", nil)
 	if err != nil {
 		t.Fatalf("Install failed: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestInstallThenUninstall(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, bundleID+".plist")
 
-	err := InstallWithBinary(path, "10:00", "daily", "/usr/local/bin/macbroom")
+	err := InstallWithBinary(path, "10:00", "daily", "/usr/local/bin/macbroom", nil)
 	if err != nil {
 		t.Fatalf("Install failed: %v", err)
 	}
@@ -273,5 +273,53 @@ func TestDefaultPath(t *testing.T) {
 	}
 	if !strings.HasSuffix(path, bundleID+".plist") {
 		t.Errorf("DefaultPath should end with %s.plist, got %q", bundleID, path)
+	}
+}
+
+func TestGeneratePlistWithCategories(t *testing.T) {
+	plist := GeneratePlistWithCategories("10:00", "daily", "/usr/local/bin/macbroom", []string{"system", "browser"})
+	if plist == "" {
+		t.Fatal("expected non-empty plist")
+	}
+	if !strings.Contains(plist, "--system") {
+		t.Error("expected --system flag in plist")
+	}
+	if !strings.Contains(plist, "--browser") {
+		t.Error("expected --browser flag in plist")
+	}
+	if !strings.Contains(plist, "--yes") {
+		t.Error("expected --yes flag in plist")
+	}
+	if !strings.Contains(plist, "--quiet") {
+		t.Error("expected --quiet flag in plist")
+	}
+}
+
+func TestGeneratePlistWithCategories_Empty(t *testing.T) {
+	plistNil := GeneratePlistWithCategories("10:00", "daily", "/usr/local/bin/macbroom", nil)
+	plistEmpty := GeneratePlistWithCategories("10:00", "daily", "/usr/local/bin/macbroom", []string{})
+	base := GeneratePlistWithBinary("10:00", "daily", "/usr/local/bin/macbroom")
+
+	if plistNil == "" {
+		t.Fatal("expected non-empty plist for nil categories")
+	}
+	if plistEmpty == "" {
+		t.Fatal("expected non-empty plist for empty categories")
+	}
+
+	// With nil or empty categories, output should match the base output.
+	if plistNil != base {
+		t.Errorf("nil categories plist should match base plist")
+	}
+	if plistEmpty != base {
+		t.Errorf("empty categories plist should match base plist")
+	}
+
+	// Should not contain any extra --category flags.
+	if strings.Contains(plistNil, "--system") {
+		t.Error("nil categories plist should not contain --system")
+	}
+	if strings.Contains(plistEmpty, "--browser") {
+		t.Error("empty categories plist should not contain --browser")
 	}
 }

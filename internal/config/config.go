@@ -64,10 +64,11 @@ type SpaceLensConfig struct {
 
 // ScheduleConfig controls automated/scheduled cleaning.
 type ScheduleConfig struct {
-	Enabled  bool   `yaml:"enabled"`
-	Interval string `yaml:"interval"`
-	Time     string `yaml:"time"`
-	Notify   bool   `yaml:"notify"`
+	Enabled    bool     `yaml:"enabled"`
+	Interval   string   `yaml:"interval"`
+	Time       string   `yaml:"time"`
+	Notify     bool     `yaml:"notify"`
+	Categories []string `yaml:"categories"`
 }
 
 // Default returns a Config with all default values populated.
@@ -106,10 +107,11 @@ func Default() *Config {
 			Depth:       2,
 		},
 		Schedule: ScheduleConfig{
-			Enabled:  false,
-			Interval: "daily",
-			Time:     "10:00",
-			Notify:   true,
+			Enabled:    false,
+			Interval:   "daily",
+			Time:       "10:00",
+			Notify:     true,
+			Categories: []string{},
 		},
 	}
 }
