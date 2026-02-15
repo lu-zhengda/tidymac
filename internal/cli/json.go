@@ -7,6 +7,7 @@ import (
 	"github.com/lu-zhengda/macbroom/internal/history"
 	"github.com/lu-zhengda/macbroom/internal/scancache"
 	"github.com/lu-zhengda/macbroom/internal/scanner"
+	"github.com/lu-zhengda/macbroom/internal/trends"
 )
 
 // ---------------------------------------------------------------------------
@@ -265,4 +266,20 @@ type watchAlertJSON struct {
 	Threshold int64     `json:"threshold"`
 	Alert     bool      `json:"alert"`
 	Message   string    `json:"message"`
+}
+
+// ---------------------------------------------------------------------------
+// Trends JSON types
+// ---------------------------------------------------------------------------
+
+type trendsJSON struct {
+	Version   string             `json:"version"`
+	Timestamp time.Time          `json:"timestamp"`
+	Report    trends.TrendReport `json:"report"`
+}
+
+type trendsRecordJSON struct {
+	Version   string                 `json:"version"`
+	Timestamp time.Time              `json:"timestamp"`
+	Snapshot  trends.StorageSnapshot `json:"snapshot"`
 }

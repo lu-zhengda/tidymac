@@ -91,6 +91,7 @@ func init() {
 	rootCmd.AddCommand(configCmd)
 	rootCmd.AddCommand(reportCmd)
 	rootCmd.AddCommand(watchCmd)
+	rootCmd.AddCommand(trendsCmd)
 }
 
 // shouldSkipConfirm returns true if the user wants to skip confirmation,
