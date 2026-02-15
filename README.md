@@ -4,7 +4,7 @@ A lightweight macOS cleanup tool for the terminal.
 
 Scan and remove system junk, browser caches, Xcode artifacts, Docker waste, Node.js caches, Python/Rust/Go build artifacts, JetBrains IDE caches, and more — from the command line or an interactive TUI.
 
-Scan and clean output is colored with category-specific colors, risk-level highlighting, and results sorted by size (largest first).
+Scan and clean output is colored with category-specific colors, risk-level highlighting, and results sorted by size (largest first). Includes scan diff tracking, risk summary breakdown, JSON output, and config validation.
 
 ## Install
 
@@ -72,6 +72,15 @@ macbroom schedule enable
 macbroom schedule disable
 macbroom schedule status
 
+# JSON output for scripting and automation
+macbroom scan --json
+macbroom clean --system --json
+macbroom dupes --json
+macbroom stats --json
+
+# Validate your config file
+macbroom config validate
+
 # Use scan profiles
 macbroom scan --dev               # all dev-tool caches
 macbroom scan --caches            # system, browser, homebrew
@@ -83,11 +92,24 @@ macbroom scan --exclude "~/Projects/**" --exclude "*.iso"
 macbroom clean --system --exclude "~/Library/Caches/com.important.app"
 ```
 
+Scan output includes a risk summary breakdown and diff indicators when a previous scan exists:
+
+```
+System Junk (8.2 GB, 130 items)  +1.2 GB
+Homebrew (2.1 GB, 117 items)  -200.0 MB
+Browser Cache (1.8 GB, 3 items)  (new)
+
+Total reclaimable: 12.1 GB
+Safe: 4.0 GB (33%)  Moderate: 7.6 GB (63%)  Risky: 500.0 KB (4%)
++2.8 GB since Feb 13
+```
+
 ### Flags
 
 | Flag | Scope | Description |
 |------|-------|-------------|
 | `--config` | Global | Path to config file (default `~/.config/macbroom/config.yaml`) |
+| `--json` | Global | Output as JSON (suppresses human-readable output) |
 | `--yolo` | Global | Skip ALL confirmation prompts |
 | `--yes, -y` | Per-command | Skip that command's confirmation |
 | `--permanent` | clean, uninstall | Permanently delete instead of Trash |
@@ -208,10 +230,11 @@ internal/
                      SpaceLens, Docker, Node, Homebrew, Simulator, Python,
                      Rust, Go, JetBrains, Maven, Gradle, Ruby)
   engine/            Orchestrates scanners with worker pool and live progress
-  cli/               Cobra commands and flags
-  tui/               Bubbletea interactive UI with treemap visualization,
+  cli/               Cobra commands, flags, and JSON output
+  tui/               Bubbletea interactive UI with bar list visualization,
                      per-scanner progress, and animated counters
-  config/            YAML config loading and defaults
+  config/            YAML config loading, defaults, and validation
+  scancache/         Scan snapshot persistence and diff computation
   dupes/             Duplicate file detection (three-pass: size, partial hash, full hash)
   history/           Cleanup history tracking and stats
   schedule/          LaunchAgent plist generation for scheduled cleaning
