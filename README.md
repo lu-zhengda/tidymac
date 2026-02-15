@@ -2,7 +2,7 @@
 
 A lightweight macOS cleanup tool for the terminal.
 
-Scan and remove system junk, browser caches, Xcode artifacts, Docker waste, Node.js caches, and more — from the command line or an interactive TUI.
+Scan and remove system junk, browser caches, Xcode artifacts, Docker waste, Node.js caches, Python/Rust/Go build artifacts, JetBrains IDE caches, and more — from the command line or an interactive TUI.
 
 ## Install
 
@@ -38,7 +38,7 @@ Or use CLI subcommands:
 # Scan for reclaimable space
 macbroom scan
 macbroom scan --system --browser
-macbroom scan --docker --node
+macbroom scan --docker --node --python --rust --go
 
 # Clean junk files (moves to Trash)
 macbroom clean
@@ -89,6 +89,10 @@ macbroom schedule status
 | `--node` | scan, clean | Filter to Node.js cache only |
 | `--homebrew` | scan, clean | Filter to Homebrew cache only |
 | `--simulator` | scan, clean | Filter to iOS Simulator data only |
+| `--python` | scan, clean | Filter to Python junk only |
+| `--rust` | scan, clean | Filter to Rust junk only |
+| `--go` | scan, clean | Filter to Go junk only |
+| `--jetbrains` | scan, clean | Filter to JetBrains junk only |
 | `--min-size` | dupes | Minimum file size for duplicate detection |
 | `--depth N` | spacelens | Directory depth (default 2) |
 | `-i` | spacelens | Interactive TUI mode |
@@ -105,6 +109,10 @@ macbroom schedule status
 | Node.js | npm cache, stale `node_modules` | Safe |
 | Homebrew | Old formula downloads and bottles | Safe |
 | iOS Simulators | Unavailable simulator data and caches | Safe |
+| Python | pip cache, conda packages, stale virtualenvs | Safe-Moderate |
+| Rust | Cargo registry cache, stale `target/` directories | Safe-Moderate |
+| Go | Module cache, build cache | Safe |
+| JetBrains | IDE caches and logs (IntelliJ, GoLand, PyCharm, etc.) | Safe |
 | App Uninstall | App bundle + preferences, caches, support files | Moderate |
 | Orphaned Preferences | Plist files for uninstalled apps | Safe |
 | Duplicate Files | Identical files across Downloads, Desktop, Documents | Safe |
@@ -123,6 +131,10 @@ scanners:
   node: true
   homebrew: true
   ios_simulators: true
+  python: true
+  rust: true
+  go: true
+  jetbrains: true
 
 large_files:
   min_size: 100MB
@@ -157,11 +169,12 @@ cmd/macbroom/        Entry point
 cmd/gendocs/         Man page generator
 internal/
   scanner/           Modular scanners (System, Browser, Xcode, Apps, LargeFiles,
-                     SpaceLens, Docker, Node, Homebrew, Simulator)
-  engine/            Orchestrates scanners concurrently
+                     SpaceLens, Docker, Node, Homebrew, Simulator, Python,
+                     Rust, Go, JetBrains)
+  engine/            Orchestrates scanners with worker pool and live progress
   cli/               Cobra commands and flags
-  tui/               Bubbletea interactive UI (Clean, Space Lens, Maintenance,
-                     Duplicates, Uninstall)
+  tui/               Bubbletea interactive UI with treemap visualization,
+                     per-scanner progress, and animated counters
   config/            YAML config loading and defaults
   dupes/             Duplicate file detection (three-pass: size, partial hash, full hash)
   history/           Cleanup history tracking and stats
