@@ -229,6 +229,10 @@ macbroom --generate-completion zsh > "${fpath[1]}/_macbroom"
 macbroom --generate-completion fish > ~/.config/fish/completions/macbroom.fish
 ```
 
+## Claude Code
+
+Available as a skill in the [macos-toolkit](https://github.com/lu-zhengda/macos-toolkit) Claude Code plugin. Ask Claude "clean up my Mac" or "free disk space" and it runs macbroom automatically.
+
 ## License
 
 MIT
