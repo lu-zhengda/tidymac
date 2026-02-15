@@ -164,8 +164,6 @@ func (e *Engine) ScanGroupedWithProgress(ctx context.Context, concurrency int, o
 			targets, err := s.Scan(ctx)
 			targets = e.filterExcluded(targets)
 
-			<-sem // release
-
 			if onProgress != nil {
 				onProgress(ScanProgress{
 					Name:    s.Name(),
@@ -174,6 +172,8 @@ func (e *Engine) ScanGroupedWithProgress(ctx context.Context, concurrency int, o
 					Error:   err,
 				})
 			}
+
+			<-sem // release after Done callback to keep concurrency tracking consistent
 
 			mu.Lock()
 			results = append(results, ScanResult{
