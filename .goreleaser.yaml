@@ -41,5 +41,11 @@ brews:
     license: "MIT"
     install: |
       bin.install "macbroom"
+      bash_output = Utils.safe_popen_read(bin/"macbroom", "--generate-completion", "bash")
+      (bash_completion/"macbroom").write bash_output
+      zsh_output = Utils.safe_popen_read(bin/"macbroom", "--generate-completion", "zsh")
+      (zsh_completion/"_macbroom").write zsh_output
+      fish_output = Utils.safe_popen_read(bin/"macbroom", "--generate-completion", "fish")
+      (fish_completion/"macbroom.fish").write fish_output
     test: |
       system "#{bin}/macbroom", "--version"
