@@ -87,6 +87,16 @@ type dupesCleanDoneMsg struct {
 	freed   int64
 }
 
+type cleanProgressMsg struct {
+	done  int
+	total int
+}
+
+type dupesCleanProgressMsg struct {
+	done  int
+	total int
+}
+
 type uninstallScanDoneMsg struct {
 	targets []scanner.Target
 }
@@ -150,6 +160,7 @@ type Model struct {
 	dupGroups       []dupes.Group
 	dupLoading      bool
 	dupScanning     string // current file being scanned
+	dupDone         int    // files scanned so far
 	dupCancel       context.CancelFunc
 	dupProgressCh   chan string
 	dupCursor       int
@@ -158,6 +169,16 @@ type Model struct {
 	dupDeleted      int
 	dupFailed       int
 	dupFreed        int64
+
+	// Cleaning progress state
+	cleaning      bool
+	cleanDone     int
+	cleanTotal    int
+	cleanDoneCh   chan cleanProgressMsg
+	dupCleaning   bool
+	dupCleanDone  int
+	dupCleanTotal int
+	dupCleanCh    chan dupesCleanProgressMsg
 
 	// Uninstall state
 	uiApps            []string     // installed app names
@@ -273,7 +294,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if m.scanning || m.currentView == viewScanning || m.slLoading || m.dupLoading || m.uiLoading || m.currentView == viewMaintain {
+		if m.scanning || m.currentView == viewScanning || m.slLoading || m.dupLoading || m.uiLoading || m.currentView == viewMaintain || m.cleaning || m.dupCleaning {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
 			return m, cmd
@@ -304,7 +325,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentView = viewDashboard
 		return m, nil
 
+	case cleanProgressMsg:
+		m.cleanDone = msg.done
+		m.cleanTotal = msg.total
+		if m.cleanDoneCh != nil {
+			return m, listenCleanProgress(m.cleanDoneCh)
+		}
+		return m, nil
+
 	case cleanDoneMsg:
+		m.cleaning = false
+		m.cleanDoneCh = nil
 		m.lastCleaned = msg.cleaned
 		m.lastFailed = msg.failed
 		m.lastSize = msg.size
@@ -347,6 +378,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case dupesProgressMsg:
+		m.dupDone++
 		m.dupScanning = msg.path
 		if m.dupProgressCh != nil {
 			return m, listenDupesProgress(m.dupProgressCh)
@@ -370,7 +402,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case dupesCleanProgressMsg:
+		m.dupCleanDone = msg.done
+		m.dupCleanTotal = msg.total
+		if m.dupCleanCh != nil {
+			return m, listenDupesCleanProgress(m.dupCleanCh)
+		}
+		return m, nil
+
 	case dupesCleanDoneMsg:
+		m.dupCleaning = false
+		m.dupCleanCh = nil
 		m.dupDeleted = msg.deleted
 		m.dupFailed = msg.failed
 		m.dupFreed = msg.freed
@@ -482,6 +524,7 @@ func (m Model) updateMenu(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(m.doMaintain(), m.spinner.Tick)
 		case 3: // Duplicates
 			m.dupLoading = true
+			m.dupDone = 0
 			m.dupCursor = 0
 			m.dupScrollOffset = 0
 			m.currentView = viewDupes
@@ -883,6 +926,7 @@ func (m Model) updateDupesResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		// Re-scan.
 		m.dupLoading = true
+		m.dupDone = 0
 		m.dupCursor = 0
 		m.dupScrollOffset = 0
 		m.currentView = viewDupes
@@ -897,10 +941,29 @@ func (m Model) updateDupesResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) doDupesClean() tea.Cmd {
+func listenDupesCleanProgress(ch chan dupesCleanProgressMsg) tea.Cmd {
 	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return msg
+	}
+}
+
+func (m *Model) doDupesClean() tea.Cmd {
+	total := len(m.dupSelected)
+
+	ch := make(chan dupesCleanProgressMsg, 1)
+	m.dupCleaning = true
+	m.dupCleanDone = 0
+	m.dupCleanTotal = total
+	m.dupCleanCh = ch
+
+	cleanCmd := func() tea.Msg {
 		var deleted, failed int
 		var freed int64
+		var done int
 		for gi, g := range m.dupGroups {
 			for fi, f := range g.Files {
 				key := fmt.Sprintf("%d:%d", gi, fi)
@@ -913,10 +976,18 @@ func (m Model) doDupesClean() tea.Cmd {
 					deleted++
 					freed += g.Size
 				}
+				done++
+				select {
+				case ch <- dupesCleanProgressMsg{done: done, total: total}:
+				default:
+				}
 			}
 		}
+		close(ch)
 		return dupesCleanDoneMsg{deleted: deleted, failed: failed, freed: freed}
 	}
+
+	return tea.Batch(cleanCmd, listenDupesCleanProgress(ch))
 }
 
 func (m Model) updateUninstallInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1062,14 +1133,40 @@ func (m Model) doUninstallClean() tea.Cmd {
 	}
 }
 
-func (m Model) doClean() tea.Cmd {
+func listenCleanProgress(ch chan cleanProgressMsg) tea.Cmd {
 	return func() tea.Msg {
-		if m.categoryIdx >= len(m.results) {
-			return cleanDoneMsg{}
+		msg, ok := <-ch
+		if !ok {
+			return nil
 		}
-		targets := m.results[m.categoryIdx].Targets
+		return msg
+	}
+}
+
+func (m *Model) doClean() tea.Cmd {
+	if m.categoryIdx >= len(m.results) {
+		return func() tea.Msg { return cleanDoneMsg{} }
+	}
+	targets := m.results[m.categoryIdx].Targets
+
+	// Count selected items for progress total.
+	var total int
+	for i := range targets {
+		if m.selected[i] {
+			total++
+		}
+	}
+
+	ch := make(chan cleanProgressMsg, 1)
+	m.cleaning = true
+	m.cleanDone = 0
+	m.cleanTotal = total
+	m.cleanDoneCh = ch
+
+	cleanCmd := func() tea.Msg {
 		var cleaned, failed int
 		var totalSize int64
+		var done int
 		for i, t := range targets {
 			if !m.selected[i] {
 				continue
@@ -1080,9 +1177,17 @@ func (m Model) doClean() tea.Cmd {
 				cleaned++
 				totalSize += t.Size
 			}
+			done++
+			select {
+			case ch <- cleanProgressMsg{done: done, total: total}:
+			default:
+			}
 		}
+		close(ch)
 		return cleanDoneMsg{cleaned: cleaned, failed: failed, size: totalSize}
 	}
+
+	return tea.Batch(cleanCmd, listenCleanProgress(ch))
 }
 
 // --- Views ---
@@ -1282,6 +1387,16 @@ func (m Model) viewConfirm() string {
 	r := m.results[m.categoryIdx]
 
 	s := renderHeader("Clean", r.Category, "Confirm")
+
+	if m.cleaning {
+		s += "\n" + m.spinner.View() + " Cleaning...\n"
+		if m.cleanTotal > 0 {
+			ratio := float64(m.cleanDone) / float64(m.cleanTotal)
+			s += fmt.Sprintf("  %s %d/%d items\n", renderProgressBar(ratio, 30), m.cleanDone, m.cleanTotal)
+		}
+		return s
+	}
+
 	s += dangerBannerStyle.Render(" CONFIRM DELETION ") + "\n\n"
 
 	var selectedSize int64
@@ -1396,7 +1511,8 @@ func (m Model) viewDupes() string {
 	s := renderHeader("Duplicates")
 
 	if m.dupLoading {
-		s += "\n" + m.spinner.View() + " Scanning for duplicates...\n"
+		s += "\n"
+		s += m.spinner.View() + fmt.Sprintf(" Scanning... %d files checked", m.dupDone) + "\n"
 		if m.dupScanning != "" {
 			name := m.dupScanning
 			if len(name) > 50 {
@@ -1497,6 +1613,16 @@ func (m Model) viewDupes() string {
 
 func (m Model) viewDupesConfirm() string {
 	s := renderHeader("Duplicates", "Confirm")
+
+	if m.dupCleaning {
+		s += "\n" + m.spinner.View() + " Removing duplicates...\n"
+		if m.dupCleanTotal > 0 {
+			ratio := float64(m.dupCleanDone) / float64(m.dupCleanTotal)
+			s += fmt.Sprintf("  %s %d/%d items\n", renderProgressBar(ratio, 30), m.dupCleanDone, m.dupCleanTotal)
+		}
+		return s
+	}
+
 	s += dangerBannerStyle.Render(" CONFIRM DUPLICATE DELETION ") + "\n\n"
 
 	var selectedSize int64
