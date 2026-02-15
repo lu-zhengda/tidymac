@@ -6,12 +6,21 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var scanFilter CategoryFilter
+var (
+	scanFilter  CategoryFilter
+	scanExclude []string
+)
 
 var scanCmd = &cobra.Command{
 	Use:   "scan",
 	Short: "Scan for junk files and reclaimable space",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(scanExclude) > 0 {
+			combined := make([]string, 0, len(appConfig.Exclude)+len(scanExclude))
+			combined = append(combined, appConfig.Exclude...)
+			combined = append(combined, scanExclude...)
+			appConfig.Exclude = combined
+		}
 		e := buildEngine()
 		cats := selectedCategories(scanFilter)
 
@@ -46,4 +55,5 @@ func init() {
 	f.BoolVar(&scanFilter.Dev, "dev", false, "Scan all dev-tool caches")
 	f.BoolVar(&scanFilter.Caches, "caches", false, "Scan all general caches")
 	f.BoolVar(&scanFilter.All, "all", false, "Scan everything")
+	f.StringSliceVar(&scanExclude, "exclude", nil, "Exclude paths matching pattern (glob or dir/**)")
 }

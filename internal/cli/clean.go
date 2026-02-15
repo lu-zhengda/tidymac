@@ -17,6 +17,7 @@ var (
 	cleanDryRun    bool
 	cleanQuiet     bool
 	cleanFilter    CategoryFilter
+	cleanExclude   []string
 )
 
 // cleanPrint prints to stdout only when --quiet is not set.
@@ -37,6 +38,12 @@ var cleanCmd = &cobra.Command{
 	Use:   "clean",
 	Short: "Clean selected junk files",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(cleanExclude) > 0 {
+			combined := make([]string, 0, len(appConfig.Exclude)+len(cleanExclude))
+			combined = append(combined, appConfig.Exclude...)
+			combined = append(combined, cleanExclude...)
+			appConfig.Exclude = combined
+		}
 		e := buildEngine()
 		cats := selectedCategories(cleanFilter)
 
@@ -174,4 +181,5 @@ func init() {
 	f.BoolVar(&cleanFilter.Dev, "dev", false, "Clean all dev-tool caches")
 	f.BoolVar(&cleanFilter.Caches, "caches", false, "Clean all general caches")
 	f.BoolVar(&cleanFilter.All, "all", false, "Clean everything")
+	f.StringSliceVar(&cleanExclude, "exclude", nil, "Exclude paths matching pattern (glob or dir/**)")
 }

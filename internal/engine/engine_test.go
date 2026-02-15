@@ -166,3 +166,143 @@ func TestScanGroupedWithProgress_ContextCancelled(t *testing.T) {
 		t.Error("expected error for cancelled context")
 	}
 }
+
+func TestScanGroupedWithProgress_WithExcludeFunc(t *testing.T) {
+	e := New()
+	e.Register(&mockScanner{name: "A", targets: []scanner.Target{
+		{Path: "/a1", Size: 100},
+		{Path: "/a2", Size: 200},
+	}})
+	e.SetExcludeFunc(func(path string) bool {
+		return path == "/a1"
+	})
+
+	var mu sync.Mutex
+	var progressTargets []scanner.Target
+	results := e.ScanGroupedWithProgress(context.Background(), 2, func(p ScanProgress) {
+		if p.Status == ScanDone {
+			mu.Lock()
+			progressTargets = append(progressTargets, p.Targets...)
+			mu.Unlock()
+		}
+	})
+
+	// Check results
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result group, got %d", len(results))
+	}
+	if len(results[0].Targets) != 1 {
+		t.Fatalf("expected 1 target after exclusion, got %d", len(results[0].Targets))
+	}
+	if results[0].Targets[0].Path != "/a2" {
+		t.Errorf("expected /a2, got %s", results[0].Targets[0].Path)
+	}
+
+	// Check progress callback also got filtered results
+	mu.Lock()
+	defer mu.Unlock()
+	if len(progressTargets) != 1 {
+		t.Fatalf("expected 1 target in progress callback, got %d", len(progressTargets))
+	}
+}
+
+func TestScanAll_WithExcludeFunc(t *testing.T) {
+	targets := []scanner.Target{
+		{Path: "/tmp/cache1", Size: 1024, Category: "test"},
+		{Path: "/tmp/cache2", Size: 2048, Category: "test"},
+		{Path: "/tmp/keep", Size: 512, Category: "test"},
+	}
+
+	e := New()
+	e.Register(&mockScanner{name: "test", targets: targets})
+	e.SetExcludeFunc(func(path string) bool {
+		return path == "/tmp/cache2"
+	})
+
+	results, err := e.ScanAll(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 targets after exclusion, got %d", len(results))
+	}
+	for _, r := range results {
+		if r.Path == "/tmp/cache2" {
+			t.Error("excluded path /tmp/cache2 should not be present")
+		}
+	}
+}
+
+func TestScanAll_NilExcludeFunc(t *testing.T) {
+	targets := []scanner.Target{
+		{Path: "/tmp/a", Size: 100, Category: "test"},
+		{Path: "/tmp/b", Size: 200, Category: "test"},
+		{Path: "/tmp/c", Size: 300, Category: "test"},
+	}
+
+	e := New()
+	e.Register(&mockScanner{name: "test", targets: targets})
+	// No SetExcludeFunc call — all targets should pass through.
+
+	results, err := e.ScanAll(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 targets with nil excludeFunc, got %d", len(results))
+	}
+}
+
+func TestScanByCategory_WithExcludeFunc(t *testing.T) {
+	targets := []scanner.Target{
+		{Path: "/tmp/sys1", Size: 512, Category: "System Junk"},
+		{Path: "/tmp/sys2", Size: 1024, Category: "System Junk"},
+	}
+
+	e := New()
+	e.Register(&mockScanner{name: "System Junk", targets: targets})
+	e.SetExcludeFunc(func(path string) bool {
+		return path == "/tmp/sys1"
+	})
+
+	results, err := e.ScanByCategory(context.Background(), "System Junk")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 target after exclusion, got %d", len(results))
+	}
+	if results[0].Path != "/tmp/sys2" {
+		t.Errorf("expected /tmp/sys2, got %s", results[0].Path)
+	}
+}
+
+func TestScanGrouped_WithExcludeFunc(t *testing.T) {
+	e := New()
+	e.Register(&mockScanner{name: "A", targets: []scanner.Target{
+		{Path: "/a/keep", Category: "A"},
+		{Path: "/a/remove", Category: "A"},
+	}})
+	e.Register(&mockScanner{name: "B", targets: []scanner.Target{
+		{Path: "/b/keep", Category: "B"},
+	}})
+	e.SetExcludeFunc(func(path string) bool {
+		return path == "/a/remove"
+	})
+
+	results := e.ScanGrouped(context.Background())
+	if len(results) != 2 {
+		t.Fatalf("expected 2 scan results, got %d", len(results))
+	}
+
+	for _, r := range results {
+		for _, tgt := range r.Targets {
+			if tgt.Path == "/a/remove" {
+				t.Error("excluded path /a/remove should not be present in grouped results")
+			}
+		}
+		if r.Category == "A" && len(r.Targets) != 1 {
+			t.Errorf("expected 1 target for category A after exclusion, got %d", len(r.Targets))
+		}
+	}
+}

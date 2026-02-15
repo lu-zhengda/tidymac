@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -351,6 +352,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.scanning = false
 		m.scanProgressCh = nil
 		m.results = msg.results
+
+		// Sort categories by total size descending.
+		sort.Slice(m.results, func(i, j int) bool {
+			var si, sj int64
+			for _, t := range m.results[i].Targets {
+				si += t.Size
+			}
+			for _, t := range m.results[j].Targets {
+				sj += t.Size
+			}
+			return si > sj
+		})
+		// Sort items within each category by size descending.
+		for idx := range m.results {
+			sort.Slice(m.results[idx].Targets, func(a, b int) bool {
+				return m.results[idx].Targets[a].Size > m.results[idx].Targets[b].Size
+			})
+		}
+
 		m.currentView = viewDashboard
 		m.animStart = time.Now()
 		m.animDuration = 500 * time.Millisecond
@@ -1337,7 +1357,7 @@ func (m Model) viewDashboard() string {
 			cursor = "> "
 		}
 
-		dot := lipgloss.NewStyle().Foreground(categoryColor(r.Category)).Render("\u25cf")
+		dot := lipgloss.NewStyle().Foreground(CategoryColor(r.Category)).Render("\u25cf")
 		line := fmt.Sprintf("%s%s %-23s %10s  (%d items)",
 			cursor, dot, r.Category, utils.FormatSize(catSize), len(r.Targets))
 

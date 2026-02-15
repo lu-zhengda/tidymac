@@ -27,7 +27,7 @@ var enableCmd = &cobra.Command{
 
 		fmt.Printf("Installing LaunchAgent for %s cleanup at %s...\n", interval, timeStr)
 
-		if err := schedule.Install(path, timeStr, interval); err != nil {
+		if err := schedule.Install(path, timeStr, interval, appConfig.Schedule.Categories); err != nil {
 			return fmt.Errorf("failed to install schedule: %w", err)
 		}
 
@@ -99,6 +99,9 @@ var statusCmd = &cobra.Command{
 			fmt.Println("Scheduled cleaning: enabled")
 			fmt.Printf("  Schedule: %s at %s\n", appConfig.Schedule.Interval, appConfig.Schedule.Time)
 			fmt.Printf("  Notify:   %v\n", appConfig.Schedule.Notify)
+			if len(appConfig.Schedule.Categories) > 0 {
+				fmt.Printf("  Categories: %s\n", strings.Join(appConfig.Schedule.Categories, ", "))
+			}
 			fmt.Printf("  Plist:    %s\n", path)
 		} else {
 			fmt.Println("Scheduled cleaning: disabled")

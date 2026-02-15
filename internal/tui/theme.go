@@ -42,9 +42,9 @@ var categoryColors = map[string]lipgloss.Color{
 	"Ruby":              lipgloss.Color("161"),
 }
 
-// categoryColor returns the theme color for a scan category.
+// CategoryColor returns the theme color for a scan category.
 // Unknown categories fall back to colorPrimary.
-func categoryColor(name string) lipgloss.Color {
+func CategoryColor(name string) lipgloss.Color {
 	if c, ok := categoryColors[name]; ok {
 		return c
 	}

@@ -4,6 +4,8 @@ A lightweight macOS cleanup tool for the terminal.
 
 Scan and remove system junk, browser caches, Xcode artifacts, Docker waste, Node.js caches, Python/Rust/Go build artifacts, JetBrains IDE caches, and more — from the command line or an interactive TUI.
 
+Scan and clean output is colored with category-specific colors, risk-level highlighting, and results sorted by size (largest first).
+
 ## Install
 
 ```bash
@@ -75,6 +77,10 @@ macbroom scan --dev               # all dev-tool caches
 macbroom scan --caches            # system, browser, homebrew
 macbroom scan --all               # everything
 macbroom clean --dev --docker     # dev tools + Docker
+
+# Exclude specific paths from scan or clean
+macbroom scan --exclude "~/Projects/**" --exclude "*.iso"
+macbroom clean --system --exclude "~/Library/Caches/com.important.app"
 ```
 
 ### Flags
@@ -105,6 +111,7 @@ macbroom clean --dev --docker     # dev tools + Docker
 | `--dev` | scan, clean | Scan all dev-tool caches |
 | `--caches` | scan, clean | Scan all general caches |
 | `--all` | scan, clean | Scan everything |
+| `--exclude` | scan, clean | Exclude paths matching pattern (glob or `dir/**`); repeatable |
 | `--min-size` | dupes | Minimum file size for duplicate detection |
 | `--depth N` | spacelens | Directory depth (default 2) |
 | `-i` | spacelens | Interactive TUI mode |
@@ -171,13 +178,15 @@ dev_tools:
   min_age: 30d
 
 exclude:
-  - "*.important"
-  - "~/Documents/keep/**"
+  - "~/Projects/important/**"
+  - "*.iso"
 
 schedule:
-  interval: weekly
+  enabled: false
+  interval: daily
   time: "10:00"
   notify: true
+  categories: []  # empty = all; or [system, browser, homebrew]
 ```
 
 ## Safety

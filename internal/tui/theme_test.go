@@ -23,8 +23,8 @@ func TestCategoryColor(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := categoryColor(tt.name); got != tt.want {
-				t.Errorf("categoryColor(%q) = %v, want %v", tt.name, got, tt.want)
+			if got := CategoryColor(tt.name); got != tt.want {
+				t.Errorf("CategoryColor(%q) = %v, want %v", tt.name, got, tt.want)
 			}
 		})
 	}

@@ -162,6 +162,8 @@ func buildEngine() *engine.Engine {
 		e.Register(scanner.NewRubyScanner(home))
 	}
 
+	e.SetExcludeFunc(appConfig.IsExcluded)
+
 	return e
 }
 

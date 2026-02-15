@@ -340,6 +340,34 @@ func TestIsExcluded(t *testing.T) {
 	}
 }
 
+func TestIsExcluded_TildeExpansion(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home directory")
+	}
+
+	cfg := Default()
+	cfg.Exclude = []string{"~/Downloads/**"}
+
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{home + "/Downloads/file.zip", true},
+		{home + "/Downloads", true},
+		{home + "/Documents/file.txt", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			got := cfg.IsExcluded(tt.path)
+			if got != tt.want {
+				t.Errorf("IsExcluded(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadExistingFile(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
