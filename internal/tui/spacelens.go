@@ -3,10 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/lu-zhengda/macbroom/internal/scanner"
 	"github.com/lu-zhengda/macbroom/internal/utils"
 )
@@ -61,14 +59,14 @@ func (m SpaceLensModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.nodes)-1 {
 				m.cursor++
 			}
-		case "enter":
+		case "enter", "right", "l":
 			if m.cursor < len(m.nodes) && m.nodes[m.cursor].IsDir {
 				m.path = m.nodes[m.cursor].Path
 				m.loading = true
 				m.cursor = 0
 				return m, m.doAnalyze()
 			}
-		case "backspace", "h":
+		case "left", "backspace", "h":
 			if idx := lastSlash(m.path); idx > 0 {
 				m.path = m.path[:idx]
 				m.loading = true
@@ -82,67 +80,46 @@ func (m SpaceLensModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m SpaceLensModel) View() string {
 	s := renderHeader("Space Lens")
-	s += dimStyle.Render(m.path) + "\n\n"
 
 	if m.loading {
-		return s + "Analyzing...\n"
+		s += dimStyle.Render(m.path) + "\n\n"
+		s += "Analyzing...\n"
+		return s
 	}
+
+	var totalSize int64
+	for _, node := range m.nodes {
+		totalSize += node.Size
+	}
+	s += dimStyle.Render(fmt.Sprintf("%s (%s)", m.path, utils.FormatSize(totalSize))) + "\n\n"
 
 	if len(m.nodes) == 0 {
-		return s + "Empty directory.\n"
+		s += "Empty directory.\n"
+		return s + renderFooter("q quit")
 	}
 
-	maxSize := m.nodes[0].Size
-	visible := m.nodes
-	if len(visible) > 30 {
-		visible = visible[:30]
+	// Reserve lines for header (4) and footer (3).
+	tmapHeight := m.height - 7
+	tmapWidth := m.width - 2
+	if tmapHeight < 4 {
+		tmapHeight = 4
+	}
+	if tmapWidth < 20 {
+		tmapWidth = 20
 	}
 
-	for i, node := range visible {
-		cursor := "  "
-		if i == m.cursor {
-			cursor = "> "
-		}
+	s += renderTreemap(m.nodes, tmapWidth, tmapHeight, m.cursor)
 
-		icon := "  "
+	// Show selected item info below the treemap.
+	if m.cursor < len(m.nodes) {
+		node := m.nodes[m.cursor]
+		info := fmt.Sprintf("  %s  %s", node.Name, utils.FormatSize(node.Size))
 		if node.IsDir {
-			icon = "D "
+			info += "  [dir]"
 		}
-
-		name := node.Name
-		if len(name) > 30 {
-			name = name[:27] + "..."
-		}
-
-		bar := renderBar(node.Size, maxSize, 25)
-		line := fmt.Sprintf("%s%s %-30s %10s %s",
-			cursor, icon, name, utils.FormatSize(node.Size), bar)
-
-		if i == m.cursor {
-			s += selectedStyle.Render(line) + "\n"
-		} else {
-			s += line + "\n"
-		}
+		s += selectedStyle.Render(info) + "\n"
 	}
 
-	if len(m.nodes) > 30 {
-		s += dimStyle.Render(fmt.Sprintf("\n  ... and %d more items", len(m.nodes)-30)) + "\n"
-	}
-
-	s += renderFooter("j/k navigate | enter drill into folder | h/backspace go up | q quit")
+	s += renderFooter("arrows navigate | enter/right drill in | left/h go up | q quit")
 	return s
-}
-
-func renderBar(size, maxSize int64, width int) string {
-	if maxSize == 0 {
-		return ""
-	}
-	ratio := float64(size) / float64(maxSize)
-	filled := int(ratio * float64(width))
-	if filled == 0 && size > 0 {
-		filled = 1
-	}
-	color := barColor(ratio)
-	fillStyle := lipgloss.NewStyle().Foreground(color)
-	return "[" + fillStyle.Render(strings.Repeat("\u2588", filled)) + strings.Repeat("\u2591", width-filled) + "]"
 }
